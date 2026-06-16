@@ -32,6 +32,13 @@ from src.modules.yolop.lane_geometry import (
     LanePixels,
     VehicleOffsetResult,
 )
+from src.modules.yolop.postprocess import (
+    ConnectedComponentsResult,
+    connect_lane,
+    connected_components_analysis,
+    morphological_process,
+    postprocess_lane_mask,
+)
 from src.modules.yolop.output_parser import ParserConfig, YOLOPOutputParser
 from src.modules.yolop.output_schema import (
     DrivableAreaData,
@@ -68,6 +75,11 @@ __all__ = [
     "LaneGeometryExtractor",
     "LanePixels",
     "VehicleOffsetResult",
+    "morphological_process",
+    "connect_lane",
+    "connected_components_analysis",
+    "ConnectedComponentsResult",
+    "postprocess_lane_mask",
     "ParsedYOLOPOutput",
     "LaneLineData",
     "DrivableAreaData",

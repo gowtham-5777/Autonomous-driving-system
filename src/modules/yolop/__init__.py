@@ -4,7 +4,8 @@ Provides three layers for future YOLOP integration:
 
 - ``YOLOPModelLoader`` — checkpoint loading and device management
 - ``YOLOPInferenceEngine`` — forward-pass inference wrapper
-- ``parse_yolop_output`` — raw output to lane data conversion
+- ``YOLOPOutputParser`` — raw output to lane data conversion
+- ``parse_yolop_output`` — legacy convenience function (utils)
 
 No YOLOP code or model downloads are performed at this stage.
 """
@@ -26,6 +27,21 @@ from src.modules.yolop.model_loader import (
     DEFAULT_YOLOP_CHECKPOINT,
     YOLOPModelLoader,
 )
+from src.modules.yolop.lane_geometry import (
+    LaneGeometryExtractor,
+    LanePixels,
+    VehicleOffsetResult,
+)
+from src.modules.yolop.output_parser import ParserConfig, YOLOPOutputParser
+from src.modules.yolop.output_schema import (
+    DrivableAreaData,
+    LaneCenterData,
+    LaneDepartureData,
+    LaneLineData,
+    ParsedYOLOPOutput,
+    VehicleOffsetData,
+)
+
 from src.modules.yolop.utils import (
     LaneParseResult,
     compute_vehicle_offset,
@@ -47,6 +63,17 @@ __all__ = [
     "InvalidFrameError",
     "InferenceExecutionError",
     "YOLOPRawOutput",
+    "YOLOPOutputParser",
+    "ParserConfig",
+    "LaneGeometryExtractor",
+    "LanePixels",
+    "VehicleOffsetResult",
+    "ParsedYOLOPOutput",
+    "LaneLineData",
+    "DrivableAreaData",
+    "LaneCenterData",
+    "VehicleOffsetData",
+    "LaneDepartureData",
     "LaneParseResult",
     "parse_lane_mask",
     "compute_vehicle_offset",

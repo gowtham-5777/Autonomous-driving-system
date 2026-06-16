@@ -1,0 +1,58 @@
+# =============================================================================
+# Autonomous Driving Assistance System — Default Configuration
+# =============================================================================
+# Central settings for paths, models, inference thresholds, and output behavior.
+# data_root points to Google Drive (Option A) for Colab Pro training/inference.
+# =============================================================================
+
+project:
+  name: "Autonomous Driving Assistance System"
+  version: "1.0"
+
+# Root directory on Google Drive where datasets, videos, and models are stored
+data_root: "/content/drive/MyDrive/adas-project"
+
+# Dataset and output paths (relative to data_root)
+paths:
+  coco: "${data_root}/datasets/coco2017"
+  cityscapes: "${data_root}/datasets/cityscapes"
+  gtsrb: "${data_root}/datasets/gtsrb"
+  videos: "${data_root}/videos"
+  processed: "${data_root}/processed"
+  models_pretrained: "${data_root}/models/pretrained"
+  models_trained: "${data_root}/models/trained"
+
+# Weight filenames resolved relative to pretrained or trained directories
+weight_files:
+  yolop: "yolop.pt"
+  ssd_mobilenetv2: "ssd_mobilenet_v2_coco.pb"
+  yolov5: "yolov5_traffic_signs.pt"
+  unet: "unet_cityscapes.pt"
+  traffic_light_cnn: "traffic_light_cnn.pt"
+
+# Which directory each weight file lives in: "pretrained" or "trained"
+weight_locations:
+  yolop: "pretrained"
+  ssd_mobilenetv2: "pretrained"
+  yolov5: "trained"
+  unet: "pretrained"
+  traffic_light_cnn: "trained"
+
+# Reference-aligned model selections (one per perception module)
+models:
+  lane_detection: "YOLOP"
+  object_detection: "SSD_MobileNetV2"
+  traffic_sign: "YOLOv5"
+  traffic_signal: "CNN"
+  segmentation: "UNet"
+
+# Minimum confidence scores for detections to be considered valid
+thresholds:
+  object_confidence: 0.5
+  sign_confidence: 0.5
+  traffic_light_confidence: 0.5
+
+# Web application output options
+output:
+  save_annotated_video: true
+  display_hud: true

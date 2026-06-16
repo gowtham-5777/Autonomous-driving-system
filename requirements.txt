@@ -1,0 +1,26 @@
+# Autonomous Driving Assistance System — Python Dependencies
+# Requires Python 3.10+
+# Primary deep learning framework: PyTorch (TensorFlow not used)
+
+# Deep Learning
+torch>=2.0,<3.0
+torchvision>=0.15,<1.0
+
+# Computer Vision
+opencv-python>=4.8,<5.0
+pillow>=10.0,<12.0
+
+# Data Processing
+numpy>=1.24,<2.0
+pandas>=2.0,<3.0
+pyyaml>=6.0,<7.0
+scikit-learn>=1.3,<2.0
+
+# Visualization
+matplotlib>=3.7,<4.0
+
+# Web Application
+gradio>=4.0,<6.0
+
+# Utilities
+tqdm>=4.65,<5.0

@@ -1,0 +1,22 @@
+# =============================================================================
+# Autonomous Driving Assistance System — Class Label Mappings
+# =============================================================================
+# Placeholder class definitions for traffic signs and traffic light states.
+# Full GTSRB-to-label mappings will be added during YOLOv5 training setup.
+# =============================================================================
+
+# Traffic sign categories recognized by the Traffic Sign Recognition module (YOLOv5)
+traffic_sign_classes:
+  - stop
+  - speed_limit_30
+  - speed_limit_60
+  - turn_left
+  - turn_right
+  - keep_right
+  - pedestrian_crossing
+
+# Traffic signal states classified by the Traffic Signal Detection module (CNN)
+traffic_light_classes:
+  - red
+  - yellow
+  - green

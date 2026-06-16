@@ -1,4 +1,4 @@
-"""Lane Detection module — YOLOP wrapper (architecture skeleton)."""
+"""Lane Detection module — end-to-end YOLOP pipeline."""
 
 from __future__ import annotations
 
@@ -7,16 +7,26 @@ from typing import Any
 
 import numpy as np
 
-from src.modules.base import BaseModule, Frame, PredictionResult
-from src.modules.yolop import (
+from src.modules.base import BaseModule, Frame
+from src.modules.yolop.inference import (
+    InferenceExecutionError,
+    InferenceNotReadyError,
+    InvalidFrameError,
     YOLOPInferenceEngine,
-    YOLOPModelLoader,
-    parse_yolop_output,
 )
+from src.modules.yolop.lane_geometry import LaneGeometryExtractor
+from src.modules.yolop.model_loader import (
+    CheckpointLoadError,
+    CheckpointNotFoundError,
+    CheckpointValidationError,
+    YOLOPModelLoader,
+)
+from src.modules.yolop.output_parser import YOLOPOutputParser
+from src.modules.yolop.output_schema import LaneDetectionResult
+from src.modules.yolop.postprocess import postprocess_lane_mask
 from src.preprocessing.lane_preprocess import LanePreprocessor
 from src.utils.model_paths import get_yolop_weights_path
 
-# Keys returned by ``predict`` for downstream decision support.
 LANE_OUTPUT_KEYS = (
     "left_lane",
     "right_lane",
@@ -27,302 +37,253 @@ LANE_OUTPUT_KEYS = (
 
 
 class LaneDetectionModule(BaseModule):
-    """Lane detection module backed by YOLOP (skeleton).
+    """Lane detection module using the full YOLOP inference pipeline.
 
-    This class defines the production-ready architecture for lane boundary
-    detection, lane position estimation, and lane departure warnings.  YOLOP
-    model loading and inference are stubbed and will be implemented in a
-    later phase.
+    Connects preprocessing, model loading, inference, output parsing, and
+    lane geometry extraction into a single end-to-end workflow:
 
-    Pipeline (planned):
-        1. Validate input frame
-        2. Preprocess frame (``LanePreprocessor``)
-        3. Run YOLOP inference
-        4. Extract lane lines and compute offset / departure
-        5. Return structured prediction dictionary
+        Input Frame → Preprocess → YOLOP Inference → Parse Outputs
+        → Extract Lane Geometry → LaneDetectionResult
 
     Attributes:
         weights_path: Resolved filesystem path to YOLOP checkpoint.
         preprocessor: Lane-specific OpenCV preprocessing helper.
-        yolop_loader: YOLOP weight loader (``src.modules.yolop.model_loader``).
-        yolop_inference: YOLOP inference engine (``src.modules.yolop.inference``).
-        model: Placeholder for the loaded YOLOP model instance.
+        model_loader: YOLOP checkpoint loader.
+        inference_engine: YOLOP inference wrapper.
+        output_parser: Raw output parser for segmentation masks.
+        geometry_extractor: Lane center and offset calculator.
     """
 
     def __init__(
         self,
-        weights_path: Path | None = None,
+        weights_path: Path | str | None = None,
         preprocessor: LanePreprocessor | None = None,
+        model_loader: YOLOPModelLoader | None = None,
+        inference_engine: YOLOPInferenceEngine | None = None,
+        output_parser: YOLOPOutputParser | None = None,
+        geometry_extractor: LaneGeometryExtractor | None = None,
+        device: str = "cpu",
+        apply_mask_postprocess: bool = True,
     ) -> None:
-        """Create a lane detection module instance.
+        """Create a lane detection module with injectable dependencies.
 
         Args:
             weights_path: Optional override for YOLOP weights location.
-                Defaults to the path from ``config/default.yaml``.
             preprocessor: Optional ``LanePreprocessor`` instance.
-                A default instance is created when ``None``.
+            model_loader: Optional ``YOLOPModelLoader`` instance.
+            inference_engine: Optional ``YOLOPInferenceEngine`` instance.
+            output_parser: Optional ``YOLOPOutputParser`` instance.
+            geometry_extractor: Optional ``LaneGeometryExtractor`` instance.
+            device: Target device string for model loading.
+            apply_mask_postprocess: Whether to run morphological/connected
+                component refinement on lane masks before geometry extraction.
         """
         super().__init__(module_name="lane_detection")
-        self.weights_path: Path = weights_path or get_yolop_weights_path()
-        self.preprocessor: LanePreprocessor = preprocessor or LanePreprocessor()
 
-        # YOLOP integration layer (architecture stubs — no execution yet)
-        self.yolop_loader = YOLOPModelLoader(weights_path=self.weights_path)
-        self.yolop_inference = YOLOPInferenceEngine()
-        self.model: Any | None = None
+        resolved_weights = Path(weights_path) if weights_path else get_yolop_weights_path()
 
-        self._log_info("LaneDetectionModule created — weights path: %s", self.weights_path)
+        self.weights_path = resolved_weights
+        self.preprocessor = preprocessor or LanePreprocessor()
+        self.model_loader = model_loader or YOLOPModelLoader(
+            weights_path=resolved_weights,
+            device=device,
+        )
+        self.inference_engine = inference_engine or YOLOPInferenceEngine()
+        self.output_parser = output_parser or YOLOPOutputParser()
+        self.geometry_extractor = geometry_extractor or LaneGeometryExtractor()
+        self.apply_mask_postprocess = apply_mask_postprocess
+
+        self._model_package: dict[str, Any] | None = None
+
+        self._log_info(
+            "LaneDetectionModule created — weights=%s, device=%s",
+            self.weights_path,
+            device,
+        )
 
     # ------------------------------------------------------------------
     # BaseModule interface
     # ------------------------------------------------------------------
 
     def initialize(self) -> None:
-        """Load YOLOP weights and prepare the module for inference.
+        """Load YOLOP weights and attach them to the inference engine.
 
-        Delegates to ``_load_model``.  Does not perform inference.
+        Raises:
+            CheckpointNotFoundError: If the checkpoint file is missing.
+            CheckpointValidationError: If the checkpoint structure is invalid.
+            CheckpointLoadError: If PyTorch cannot load the checkpoint.
         """
-        self._log_info("Initializing lane detection module")
-        self._load_model()
-        self._log_info("Lane detection module ready (YOLOP loading stubbed)")
+        self._log_info("Initializing lane detection pipeline")
 
-    def predict(self, frame: Frame) -> PredictionResult:
-        """Run lane detection on a single frame.
+        try:
+            metadata = self.model_loader.load_model()
+            self._model_package = self.model_loader.get_model()
+            self.inference_engine.attach_model(self._model_package)
+            self._initialized = True
+
+            self._log_info(
+                "Lane detection initialized — checkpoint format=%s, tensors=%d",
+                metadata.checkpoint_format,
+                metadata.num_tensor_keys,
+            )
+        except (
+            CheckpointNotFoundError,
+            CheckpointValidationError,
+            CheckpointLoadError,
+        ) as exc:
+            self._log_error("Failed to initialize lane detection: %s", exc)
+            self._model_package = None
+            self._initialized = False
+            raise
+
+    def predict(self, frame: Frame) -> LaneDetectionResult:
+        """Run the end-to-end lane detection pipeline on a single frame.
+
+        Pipeline:
+            1. Validate input frame
+            2. Preprocess with ``LanePreprocessor``
+            3. Run ``YOLOPInferenceEngine``
+            4. Parse outputs with ``YOLOPOutputParser``
+            5. Extract geometry with ``LaneGeometryExtractor``
+            6. Return ``LaneDetectionResult``
 
         Args:
             frame: BGR input image with shape ``(H, W, 3)``.
 
         Returns:
-            Structured lane prediction dictionary.  Until YOLOP inference is
-            implemented, all lane fields are empty defaults.
+            Standardized :class:`LaneDetectionResult`.
 
         Raises:
-            ValueError: If the input frame fails validation.
+            ValueError: If the input frame is invalid.
+            RuntimeError: If the module has not been initialized.
         """
+        if not self._initialized:
+            self._log_warning("predict() called before initialize() — auto-initializing")
+            try:
+                self.initialize()
+            except (
+                CheckpointNotFoundError,
+                CheckpointValidationError,
+                CheckpointLoadError,
+            ) as exc:
+                self._log_error("Auto-initialize failed: %s", exc)
+                return LaneDetectionResult.empty(raw_status="init_failed")
+
         self._validate_input(frame)
-        self._log_debug("Running lane detection predict pipeline")
+        self._log_info("Running lane detection pipeline on frame %s", frame.shape)
 
-        # Step 1: Preprocess frame (edge detection + ROI masking)
-        preprocessed = self.preprocessor.preprocess(frame)
-        self._log_debug("Preprocessing complete — output shape %s", preprocessed.shape)
+        try:
+            return self._run_pipeline(frame)
+        except (InvalidFrameError, InferenceExecutionError) as exc:
+            self._log_error("Lane detection pipeline failed: %s", exc)
+            return LaneDetectionResult.empty(raw_status="pipeline_error")
+        except Exception as exc:
+            self._log_error("Unexpected lane detection error: %s", exc)
+            raise
 
-        # Step 2: YOLOP inference (placeholder)
-        raw_output = self._run_yolop_inference(frame, preprocessed)
-
-        # Step 3: Lane line extraction (placeholder)
-        lane_data = self._extract_lane_lines(raw_output, frame)
-
-        # Step 4: Lane departure calculation (placeholder)
-        departure_data = self._calculate_lane_departure(lane_data, frame)
-
-        results = self._format_output({**lane_data, **departure_data})
-        self._log_debug("Lane prediction complete — departure=%s", results["lane_departure"])
-        return results
-
-    def visualize(self, frame: Frame, results: PredictionResult) -> Frame:
-        """Draw lane overlays and departure warnings on the frame.
-
-        Args:
-            frame: Original BGR frame.
-            results: Prediction dictionary from ``predict``.
-
-        Returns:
-            Annotated copy of ``frame``.  Overlay drawing is stubbed until
-            lane line coordinates are available from YOLOP.
-        """
-        annotated = frame.copy()
-
-        if results.get("lane_departure"):
-            self._log_debug("Lane departure detected — visualization warning pending")
-        else:
-            self._log_debug("Rendering lane overlay (stub)")
-
-        # TODO: Draw left_lane and right_lane polylines when available.
-        # TODO: Render lane departure warning banner when lane_departure is True.
-        return annotated
+    def visualize(self, frame: Frame, results: LaneDetectionResult | dict[str, Any]) -> Frame:
+        """Return a copy of the frame (visualization not implemented)."""
+        return frame.copy()
 
     def cleanup(self) -> None:
-        """Release YOLOP model weights and free associated resources."""
+        """Release model resources and reset module state."""
         self._log_info("Cleaning up lane detection module")
-
-        # --- YOLOP CLEANUP CONNECTION ---
-        # TODO: Call self.yolop_loader.unload() when model loading is implemented.
-        self.yolop_loader.unload()
-        self.yolop_inference.detach_model()
-        self.model = None
-        # --- END YOLOP CLEANUP CONNECTION ---
+        self.model_loader.unload()
+        self.inference_engine.detach_model()
+        self._model_package = None
+        self._initialized = False
 
     # ------------------------------------------------------------------
-    # Internal helpers
+    # Pipeline
     # ------------------------------------------------------------------
 
-    def _load_model(self) -> None:
-        """Load the YOLOP model from ``weights_path``.
+    def _run_pipeline(self, frame: Frame) -> LaneDetectionResult:
+        """Execute the connected lane detection workflow."""
+        # Step 1: Classical preprocessing (edges + ROI)
+        preprocessed_edges = self.preprocessor.preprocess(frame)
+        self._log_debug("Preprocessed edges shape: %s", preprocessed_edges.shape)
 
-        Connects to ``YOLOPModelLoader`` in ``src.modules.yolop.model_loader``.
-        Actual YOLOP weight loading is not implemented yet.
-        """
-        self._log_info("Loading YOLOP model via YOLOPModelLoader")
+        # Step 2: YOLOP inference
+        if not self.inference_engine.is_ready:
+            self._log_warning("Inference engine not ready — returning empty result")
+            return LaneDetectionResult.empty(
+                raw_status="inference_not_ready",
+                preprocessed_edges=preprocessed_edges,
+            )
 
-        # --- YOLOP LOADER CONNECTION (src.modules.yolop.model_loader) ---
         try:
-            metadata = self.yolop_loader.load_model()
-            self.model = self.yolop_loader.get_model()
-            self._log_info(
-                "YOLOP checkpoint loaded — %d tensor keys, format=%s",
-                metadata.num_tensor_keys,
-                metadata.checkpoint_format,
+            raw_outputs = self.inference_engine.run(frame)
+        except InferenceNotReadyError:
+            return LaneDetectionResult.empty(
+                raw_status="inference_not_ready",
+                preprocessed_edges=preprocessed_edges,
             )
-        except (FileNotFoundError, RuntimeError, ValueError) as exc:
-            self._log_warning(
-                "YOLOP checkpoint load failed (%s) — inference will return empty results",
-                exc,
-            )
-            self.model = None
 
-        if self.model is not None:
-            self.yolop_inference.attach_model(self.model)
-        # --- END YOLOP LOADER CONNECTION ---
+        self._log_debug("YOLOP inference complete — status=%s", raw_outputs.get("inference_status"))
+
+        # Step 3: Parse segmentation outputs
+        parsed = self.output_parser.parse(raw_outputs, frame_shape=frame.shape)
+        lane_mask = parsed.lane_lines.lane_mask
+        drivable_mask = parsed.drivable_area.mask
+
+        # Step 4: Optional mask post-processing
+        if lane_mask is not None and self.apply_mask_postprocess:
+            lane_mask = postprocess_lane_mask(lane_mask)
+            self._log_debug("Lane mask post-processing applied")
+
+        # Step 5: Lane geometry extraction
+        lane_center_x: float | None = None
+        vehicle_center_x: float | None = None
+        vehicle_offset: float | None = None
+
+        if lane_mask is not None:
+            lane_center_x = self.geometry_extractor.compute_lane_center(lane_mask)
+            if lane_center_x is not None:
+                offset_result = self.geometry_extractor.compute_vehicle_offset(
+                    lane_center_x=lane_center_x,
+                    image_width=frame.shape[1],
+                )
+                vehicle_center_x = offset_result.vehicle_center_x
+                vehicle_offset = offset_result.offset_pixels
+
+        result = LaneDetectionResult(
+            left_lane=parsed.lane_lines.left_lane,
+            right_lane=parsed.lane_lines.right_lane,
+            lane_center_x=lane_center_x,
+            vehicle_center_x=vehicle_center_x,
+            vehicle_offset=vehicle_offset,
+            lane_mask=lane_mask,
+            drivable_mask=drivable_mask,
+            lane_departure=False,
+            preprocessed_edges=preprocessed_edges,
+            raw_status=parsed.raw_status,
+        )
+
+        self._log_info(
+            "Lane detection complete — center_x=%s, offset=%s px",
+            result.lane_center_x,
+            result.vehicle_offset,
+        )
+        return result
 
     def _validate_input(self, frame: Frame) -> None:
-        """Validate that the input frame is suitable for lane detection.
-
-        Args:
-            frame: Candidate input frame.
-
-        Raises:
-            ValueError: If the frame is missing, has wrong dimensions, or
-                an unsupported dtype.
-        """
+        """Validate input frame format."""
         if frame is None:
             raise ValueError("Input frame is None")
 
         if not isinstance(frame, np.ndarray):
-            raise ValueError(f"Input frame must be a numpy.ndarray, got {type(frame)}")
+            raise ValueError(f"Input frame must be numpy.ndarray, got {type(frame)}")
 
         if frame.ndim != 3 or frame.shape[2] != 3:
-            raise ValueError(
-                f"Input frame must have shape (H, W, 3), got {frame.shape}"
-            )
+            raise ValueError(f"Input frame must have shape (H, W, 3), got {frame.shape}")
 
         if frame.size == 0:
             raise ValueError("Input frame is empty")
 
         if frame.dtype != np.uint8:
-            self._log_warning(
-                "Input frame dtype is %s — expected uint8; continuing anyway",
-                frame.dtype,
-            )
-
-    def _format_output(self, raw_output: dict[str, Any]) -> PredictionResult:
-        """Normalize raw lane data into the standard prediction schema.
-
-        Args:
-            raw_output: Intermediate dictionary with lane detection fields.
-
-        Returns:
-            Prediction dictionary with guaranteed keys and default values.
-        """
-        return {
-            "left_lane": raw_output.get("left_lane"),
-            "right_lane": raw_output.get("right_lane"),
-            "lane_center": raw_output.get("lane_center"),
-            "vehicle_offset": raw_output.get("vehicle_offset"),
-            "lane_departure": bool(raw_output.get("lane_departure", False)),
-        }
-
-    def _run_yolop_inference(self, frame: Frame, preprocessed: Frame) -> dict[str, Any]:
-        """Run YOLOP inference on the original and preprocessed frames.
-
-        Connects to ``YOLOPInferenceEngine`` in ``src.modules.yolop.inference``.
-        Actual forward-pass logic is not implemented yet.
-
-        Args:
-            frame: Original BGR frame.
-            preprocessed: Preprocessed edge/ROI frame from ``LanePreprocessor``.
-
-        Returns:
-            Raw YOLOP output dictionary from the inference wrapper.
-        """
-        self._log_debug(
-            "YOLOP inference via YOLOPInferenceEngine — frame %s, preprocessed %s",
-            frame.shape,
-            preprocessed.shape,
-        )
-
-        # --- YOLOP INFERENCE CONNECTION (src.modules.yolop.inference) ---
-        # TODO: Pass original frame to yolop_inference.run() when forward pass is integrated.
-        raw_output = self.yolop_inference.run(frame)
-        # --- END YOLOP INFERENCE CONNECTION ---
-
-        return raw_output
-
-    def _extract_lane_lines(self, raw_output: dict[str, Any], frame: Frame) -> dict[str, Any]:
-        """Extract left/right lane lines and lane center from YOLOP output.
-
-        Connects to ``parse_yolop_output`` in ``src.modules.yolop.utils``.
-        Lane mask parsing is not implemented yet.
-
-        Args:
-            raw_output: Raw output from ``_run_yolop_inference``.
-            frame: Original BGR frame (used for shape reference during parsing).
-
-        Returns:
-            Dictionary with lane geometry fields.
-        """
-        self._log_debug("Parsing YOLOP output via parse_yolop_output")
-
-        # --- YOLOP OUTPUT PARSING CONNECTION (src.modules.yolop.utils) ---
-        # TODO: Pass raw_output from YOLOPInferenceEngine to parse_yolop_output().
-        # TODO: Map parsed left_lane, right_lane, lane_center into lane_data.
-        # TODO: Use compute_vehicle_offset() for offset and departure fields.
-        lane_data = parse_yolop_output(raw_output, frame_shape=frame.shape)
-        # --- END YOLOP OUTPUT PARSING CONNECTION ---
-
-        return {
-            "left_lane": lane_data.get("left_lane"),
-            "right_lane": lane_data.get("right_lane"),
-            "lane_center": lane_data.get("lane_center"),
-        }
-
-    def _calculate_lane_departure(
-        self,
-        lane_data: dict[str, Any],
-        frame: Frame,
-    ) -> dict[str, Any]:
-        """Compute vehicle offset and lane departure warning.
-
-        Placeholder: assumes vehicle at image horizontal center and returns
-        no departure until lane center is available.
-
-        Args:
-            lane_data: Output from ``_extract_lane_lines``.
-            frame: Original BGR frame used for reference dimensions.
-
-        Returns:
-            Dictionary with ``vehicle_offset`` and ``lane_departure`` keys.
-        """
-        self._log_debug("Lane departure calculation placeholder")
-
-        # TODO: Compare lane_center to vehicle position (image center proxy).
-        # TODO: Set lane_departure True when offset exceeds configured threshold.
-        _ = lane_data, frame  # referenced until logic is implemented
-        return {
-            "vehicle_offset": None,
-            "lane_departure": False,
-        }
+            self._log_warning("Input frame dtype is %s — expected uint8", frame.dtype)
 
     @staticmethod
-    def empty_prediction() -> PredictionResult:
-        """Return an empty lane prediction with all default values.
-
-        Returns:
-            Prediction dictionary with no detected lanes.
-        """
-        return {
-            "left_lane": None,
-            "right_lane": None,
-            "lane_center": None,
-            "vehicle_offset": None,
-            "lane_departure": False,
-        }
+    def empty_prediction() -> LaneDetectionResult:
+        """Return an empty lane detection result."""
+        return LaneDetectionResult.empty()

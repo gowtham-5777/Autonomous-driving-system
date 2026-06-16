@@ -84,6 +84,55 @@ class LaneDepartureData:
 
 
 @dataclass
+class LaneDetectionResult:
+    """Standardized result from the lane detection pipeline.
+
+    Attributes:
+        left_lane: Left lane boundary polyline (``None`` until extracted).
+        right_lane: Right lane boundary polyline (``None`` until extracted).
+        lane_center_x: Lane center x-coordinate in pixels.
+        vehicle_center_x: Ego vehicle x-position proxy in pixels.
+        vehicle_offset: Lateral offset in pixels (lane_center - vehicle_center).
+        lane_mask: Binary lane segmentation mask.
+        drivable_mask: Binary drivable-area segmentation mask.
+        lane_departure: Lane departure flag (not implemented in v1).
+        preprocessed_edges: Edge/ROI preprocessed frame from ``LanePreprocessor``.
+        raw_status: Inference/parsing status string.
+    """
+
+    left_lane: LanePolyline = None
+    right_lane: LanePolyline = None
+    lane_center_x: float | None = None
+    vehicle_center_x: float | None = None
+    vehicle_offset: float | None = None
+    lane_mask: np.ndarray | None = None
+    drivable_mask: np.ndarray | None = None
+    lane_departure: bool = False
+    preprocessed_edges: np.ndarray | None = None
+    raw_status: str = "empty"
+
+    def to_prediction_dict(self) -> dict[str, Any]:
+        """Convert to the legacy prediction dictionary schema."""
+        return {
+            "left_lane": self.left_lane,
+            "right_lane": self.right_lane,
+            "lane_center": self.lane_center_x,
+            "vehicle_offset": self.vehicle_offset,
+            "lane_departure": self.lane_departure,
+            "lane_mask": self.lane_mask,
+            "drivable_mask": self.drivable_mask,
+            "vehicle_center_x": self.vehicle_center_x,
+            "preprocessed_edges": self.preprocessed_edges,
+            "raw_status": self.raw_status,
+        }
+
+    @classmethod
+    def empty(cls, raw_status: str = "empty") -> LaneDetectionResult:
+        """Return an empty lane detection result."""
+        return cls(raw_status=raw_status)
+
+
+@dataclass
 class ParsedYOLOPOutput:
     """Fully parsed YOLOP output for lane detection modules.
 

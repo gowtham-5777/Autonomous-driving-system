@@ -1,7 +1,8 @@
 """ADAS perception modules package."""
 
 from src.modules.base import BaseModule, Frame, PredictionResult
-from src.modules.lane_detection import LaneDetectionModule
+from src.modules.lane_detection import LaneDetectionModule, LANE_OUTPUT_KEYS
+from src.modules.yolop.output_schema import LaneDetectionResult
 from src.modules.segmentation import SegmentationModule
 from src.modules.traffic_sign import TrafficSignModule
 from src.modules.traffic_signal import TrafficSignalModule
@@ -12,6 +13,8 @@ __all__ = [
     "Frame",
     "PredictionResult",
     "LaneDetectionModule",
+    "LaneDetectionResult",
+    "LANE_OUTPUT_KEYS",
     "VehicleDetectionModule",
     "TrafficSignModule",
     "TrafficSignalModule",

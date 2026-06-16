@@ -1,0 +1,198 @@
+"""Shared pytest fixtures for ADAS integration tests."""
+
+from __future__ import annotations
+
+import logging
+import sys
+from pathlib import Path
+
+import cv2
+import numpy as np
+import pytest
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
+ROAD_IMAGE_PATH = FIXTURES_DIR / "road_sample.jpg"
+STUB_WEIGHTS_PATH = FIXTURES_DIR / "stub_yolop_weights.pth"
+
+# Ensure ``import src...`` resolves when running pytest from the project root.
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+
+@pytest.fixture(scope="session", autouse=True)
+def configure_test_logging() -> None:
+    """Enable detailed logging for ADAS modules during test runs."""
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+        datefmt="%H:%M:%S",
+        force=True,
+    )
+
+    for logger_name in (
+        "adas",
+        "adas.modules",
+        "adas.modules.lane_detection",
+        "adas.modules.yolop",
+        "adas.preprocessing",
+        "src",
+    ):
+        logging.getLogger(logger_name).setLevel(logging.DEBUG)
+
+
+def _create_road_image(width: int = 1280, height: int = 720) -> np.ndarray:
+    """Build a synthetic forward-facing road scene (BGR, uint8)."""
+    image = np.zeros((height, width, 3), dtype=np.uint8)
+
+    horizon = height // 2
+    for row in range(horizon):
+        shade = max(90, 210 - row // 4)
+        image[row, :] = (shade, shade - 10, shade - 30)
+
+    image[horizon:, :] = (70, 70, 70)
+
+    left_bottom = (width // 2 - 120, height - 1)
+    left_top = (width // 2 - 40, horizon + 40)
+    right_bottom = (width // 2 + 120, height - 1)
+    right_top = (width // 2 + 40, horizon + 40)
+
+    cv2.fillPoly(
+        image,
+        [np.array([left_bottom, right_bottom, right_top, left_top], dtype=np.int32)],
+        (55, 55, 55),
+    )
+    cv2.line(image, left_bottom, left_top, (255, 255, 255), thickness=10)
+    cv2.line(image, right_bottom, right_top, (255, 255, 255), thickness=10)
+    cv2.line(
+        image,
+        (width // 2, height - 1),
+        (width // 2, horizon + 60),
+        (220, 220, 0),
+        thickness=4,
+    )
+
+    return image
+
+
+def _ensure_road_image() -> Path:
+    """Load or create the road sample image used by integration tests."""
+    FIXTURES_DIR.mkdir(parents=True, exist_ok=True)
+
+    if ROAD_IMAGE_PATH.is_file():
+        return ROAD_IMAGE_PATH
+
+    road_image = _create_road_image()
+    if not cv2.imwrite(str(ROAD_IMAGE_PATH), road_image):
+        raise RuntimeError(f"Failed to write road fixture to {ROAD_IMAGE_PATH}")
+
+    return ROAD_IMAGE_PATH
+
+
+def _ensure_stub_weights() -> Path:
+    """Create a minimal valid YOLOP checkpoint when real weights are unavailable."""
+    torch = pytest.importorskip("torch")
+
+    FIXTURES_DIR.mkdir(parents=True, exist_ok=True)
+
+    if STUB_WEIGHTS_PATH.is_file():
+        return STUB_WEIGHTS_PATH
+
+    checkpoint = {
+        "state_dict": {
+            "stub.conv.weight": torch.zeros(3, 3, 3, 3),
+            "stub.conv.bias": torch.zeros(3),
+        },
+        "epoch": 0,
+    }
+    torch.save(checkpoint, STUB_WEIGHTS_PATH)
+    return STUB_WEIGHTS_PATH
+
+
+def _resolve_weights_path() -> Path:
+    """Prefer real YOLOP weights; fall back to a minimal stub checkpoint."""
+    from src.utils.model_paths import get_yolop_weights_path
+
+    configured = get_yolop_weights_path()
+    if configured.is_file():
+        return configured
+
+    return _ensure_stub_weights()
+
+
+@pytest.fixture(scope="session")
+def road_image_path() -> Path:
+    """Filesystem path to a road sample image."""
+    return _ensure_road_image()
+
+
+@pytest.fixture
+def road_frame(road_image_path: Path) -> np.ndarray:
+    """BGR road image loaded from the test fixture."""
+    frame = cv2.imread(str(road_image_path), cv2.IMREAD_COLOR)
+    if frame is None:
+        pytest.fail(f"Could not load road image: {road_image_path}")
+
+    assert frame.ndim == 3 and frame.shape[2] == 3
+    assert frame.dtype == np.uint8
+    return frame
+
+
+@pytest.fixture
+def yolop_weights_path() -> Path:
+    """Resolved YOLOP checkpoint path (real weights or stub)."""
+    return _resolve_weights_path()
+
+
+@pytest.fixture
+def stub_inference_engine():
+    """Inference engine that returns synthetic segmentation heads for pipeline tests."""
+    from src.modules.yolop.inference import InferenceConfig, YOLOPInferenceEngine
+
+    class _StubYOLOPInferenceEngine(YOLOPInferenceEngine):
+        """Stub forward pass with fake drivable/lane tensors until YOLOP is integrated."""
+
+        def run(self, frame: np.ndarray) -> dict:
+            if not self.is_ready:
+                return self.empty_output()
+
+            self._validate_frame(frame)
+            target_width, target_height = self.config.input_size
+
+            drivable = np.zeros((2, target_height, target_width), dtype=np.float32)
+            drivable[1, target_height // 2 :, :] = 2.0
+
+            lane = np.zeros((2, target_height, target_width), dtype=np.float32)
+            lane[1, target_height // 2 :, target_width // 2 - 30 : target_width // 2 + 30] = 2.0
+
+            logger = logging.getLogger("tests.stub_inference")
+            logger.info(
+                "Stub inference returning synthetic masks — shape=(2, %d, %d)",
+                target_height,
+                target_width,
+            )
+
+            return {
+                1: drivable,
+                2: lane,
+                "inference_status": "stub_segmentation",
+                "original_shape": frame.shape,
+                "input_size": self.config.input_size,
+                "confidence_threshold": self.config.confidence_threshold,
+            }
+
+    return _StubYOLOPInferenceEngine(config=InferenceConfig(device="cpu"))
+
+
+@pytest.fixture
+def lane_detection_module(yolop_weights_path: Path, stub_inference_engine):
+    """Initialized :class:`LaneDetectionModule` ready for inference."""
+    from src.modules.lane_detection import LaneDetectionModule
+
+    module = LaneDetectionModule(
+        weights_path=yolop_weights_path,
+        inference_engine=stub_inference_engine,
+        device="cpu",
+    )
+    module.initialize()
+    return module

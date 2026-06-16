@@ -93,7 +93,7 @@ def parse_yolop_output(
     calculation from a single raw output dictionary.
 
     Args:
-        raw_output: Raw output from ``YOLOPInference.predict()``.
+        raw_output: Raw output from ``YOLOPInferenceEngine.run()``.
         frame_shape: Shape of the original BGR frame.
 
     Returns:

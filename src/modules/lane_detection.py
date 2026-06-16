@@ -8,7 +8,11 @@ from typing import Any
 import numpy as np
 
 from src.modules.base import BaseModule, Frame, PredictionResult
-from src.modules.yolop import YOLOPInference, YOLOPModelLoader, parse_yolop_output
+from src.modules.yolop import (
+    YOLOPInferenceEngine,
+    YOLOPModelLoader,
+    parse_yolop_output,
+)
 from src.preprocessing.lane_preprocess import LanePreprocessor
 from src.utils.model_paths import get_yolop_weights_path
 
@@ -41,7 +45,7 @@ class LaneDetectionModule(BaseModule):
         weights_path: Resolved filesystem path to YOLOP checkpoint.
         preprocessor: Lane-specific OpenCV preprocessing helper.
         yolop_loader: YOLOP weight loader (``src.modules.yolop.model_loader``).
-        yolop_inference: YOLOP inference wrapper (``src.modules.yolop.inference``).
+        yolop_inference: YOLOP inference engine (``src.modules.yolop.inference``).
         model: Placeholder for the loaded YOLOP model instance.
     """
 
@@ -64,7 +68,7 @@ class LaneDetectionModule(BaseModule):
 
         # YOLOP integration layer (architecture stubs — no execution yet)
         self.yolop_loader = YOLOPModelLoader(weights_path=self.weights_path)
-        self.yolop_inference = YOLOPInference()
+        self.yolop_inference = YOLOPInferenceEngine()
         self.model: Any | None = None
 
         self._log_info("LaneDetectionModule created — weights path: %s", self.weights_path)
@@ -144,7 +148,7 @@ class LaneDetectionModule(BaseModule):
         # --- YOLOP CLEANUP CONNECTION ---
         # TODO: Call self.yolop_loader.unload() when model loading is implemented.
         self.yolop_loader.unload()
-        self.yolop_inference.set_model(None)
+        self.yolop_inference.detach_model()
         self.model = None
         # --- END YOLOP CLEANUP CONNECTION ---
 
@@ -161,19 +165,23 @@ class LaneDetectionModule(BaseModule):
         self._log_info("Loading YOLOP model via YOLOPModelLoader")
 
         # --- YOLOP LOADER CONNECTION (src.modules.yolop.model_loader) ---
-        # TODO: Call self.yolop_loader.load() when YOLOP dependency is added.
-        # TODO: Assign returned model to self.model and self.yolop_inference.
         try:
-            self.model = self.yolop_loader.load()
-        except FileNotFoundError:
+            metadata = self.yolop_loader.load_model()
+            self.model = self.yolop_loader.get_model()
+            self._log_info(
+                "YOLOP checkpoint loaded — %d tensor keys, format=%s",
+                metadata.num_tensor_keys,
+                metadata.checkpoint_format,
+            )
+        except (FileNotFoundError, RuntimeError, ValueError) as exc:
             self._log_warning(
-                "YOLOP weights not found at %s — inference will return empty results",
-                self.weights_path,
+                "YOLOP checkpoint load failed (%s) — inference will return empty results",
+                exc,
             )
             self.model = None
 
         if self.model is not None:
-            self.yolop_inference.set_model(self.model)
+            self.yolop_inference.attach_model(self.model)
         # --- END YOLOP LOADER CONNECTION ---
 
     def _validate_input(self, frame: Frame) -> None:
@@ -226,7 +234,7 @@ class LaneDetectionModule(BaseModule):
     def _run_yolop_inference(self, frame: Frame, preprocessed: Frame) -> dict[str, Any]:
         """Run YOLOP inference on the original and preprocessed frames.
 
-        Connects to ``YOLOPInference`` in ``src.modules.yolop.inference``.
+        Connects to ``YOLOPInferenceEngine`` in ``src.modules.yolop.inference``.
         Actual forward-pass logic is not implemented yet.
 
         Args:
@@ -237,15 +245,14 @@ class LaneDetectionModule(BaseModule):
             Raw YOLOP output dictionary from the inference wrapper.
         """
         self._log_debug(
-            "YOLOP inference via YOLOPInference — frame %s, preprocessed %s",
+            "YOLOP inference via YOLOPInferenceEngine — frame %s, preprocessed %s",
             frame.shape,
             preprocessed.shape,
         )
 
         # --- YOLOP INFERENCE CONNECTION (src.modules.yolop.inference) ---
-        # TODO: Pass original frame (and/or preprocessed) to yolop_inference.predict().
-        # TODO: Optionally fuse LanePreprocessor output with YOLOP input pipeline.
-        raw_output = self.yolop_inference.predict(frame)
+        # TODO: Pass original frame to yolop_inference.run() when forward pass is integrated.
+        raw_output = self.yolop_inference.run(frame)
         # --- END YOLOP INFERENCE CONNECTION ---
 
         return raw_output
@@ -266,7 +273,7 @@ class LaneDetectionModule(BaseModule):
         self._log_debug("Parsing YOLOP output via parse_yolop_output")
 
         # --- YOLOP OUTPUT PARSING CONNECTION (src.modules.yolop.utils) ---
-        # TODO: Pass raw_output from YOLOPInference to parse_yolop_output().
+        # TODO: Pass raw_output from YOLOPInferenceEngine to parse_yolop_output().
         # TODO: Map parsed left_lane, right_lane, lane_center into lane_data.
         # TODO: Use compute_vehicle_offset() for offset and departure fields.
         lane_data = parse_yolop_output(raw_output, frame_shape=frame.shape)

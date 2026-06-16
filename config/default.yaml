@@ -24,7 +24,7 @@ paths:
 
 # Weight filenames resolved relative to pretrained or trained directories
 weight_files:
-  yolop: "yolop.pt"
+  yolop: "yolop/End-to-end.pth"
   ssd_mobilenetv2: "ssd_mobilenet_v2_coco.pb"
   yolov5: "yolov5_traffic_signs.pt"
   unet: "unet_cityscapes.pt"

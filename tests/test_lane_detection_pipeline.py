@@ -110,6 +110,8 @@ class TestLaneDetectionPipeline:
         assert result.preprocessed_edges.shape[:2] == road_frame.shape[:2]
         assert result.lane_mask is not None
         assert result.drivable_mask is not None
+        assert result.lane_center_x is not None
+        assert result.vehicle_offset is not None
 
         prediction = result.to_prediction_dict()
         assert prediction["lane_center"] == result.lane_center_x

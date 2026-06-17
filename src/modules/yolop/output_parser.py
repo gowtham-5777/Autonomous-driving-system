@@ -14,7 +14,7 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 
 from .lane_geometry import LaneGeometryExtractor
-from .postprocess import resize_mask_to_frame
+from .mask_resize import resize_mask_to_frame
 from .output_schema import (
     DrivableAreaData,
     LaneCenterData,

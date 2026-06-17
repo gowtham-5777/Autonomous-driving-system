@@ -32,13 +32,13 @@ from .lane_geometry import (
     LanePixels,
     VehicleOffsetResult,
 )
+from .mask_resize import resize_mask_to_frame
 from .postprocess import (
     ConnectedComponentsResult,
     connect_lane,
     connected_components_analysis,
     morphological_process,
     postprocess_lane_mask,
-    resize_mask_to_frame,
 )
 from .output_parser import ParserConfig, YOLOPOutputParser
 from .output_schema import (

@@ -18,6 +18,8 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
+from .mask_resize import resize_mask_to_frame
+
 logger = logging.getLogger("adas.modules.yolop.postprocess")
 
 ImageArray = np.ndarray
@@ -33,41 +35,6 @@ __all__ = [
     "postprocess_lane_mask",
     "resize_mask_to_frame",
 ]
-
-
-def resize_mask_to_frame(
-    mask: ImageArray | None,
-    frame_height: int,
-    frame_width: int,
-) -> ImageArray | None:
-    """Resize a binary mask from model resolution to original frame dimensions.
-
-    Args:
-        mask: Binary segmentation mask at model input resolution.
-        frame_height: Original frame height ``H`` (``frame.shape[0]``).
-        frame_width: Original frame width ``W`` (``frame.shape[1]``).
-
-    Returns:
-        Mask with shape ``(frame_height, frame_width)``, or ``None`` when
-        ``mask`` is ``None``.
-    """
-    if mask is None:
-        return None
-
-    resized = cv2.resize(
-        np.asarray(mask, dtype=np.uint8),
-        (int(frame_width), int(frame_height)),
-        interpolation=cv2.INTER_NEAREST,
-    )
-
-    logger.debug(
-        "resize_mask_to_frame — %s -> %s (target=%dx%d)",
-        mask.shape,
-        resized.shape,
-        frame_height,
-        frame_width,
-    )
-    return resized
 
 
 @dataclass(frozen=True)

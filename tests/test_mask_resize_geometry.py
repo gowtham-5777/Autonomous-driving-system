@@ -7,7 +7,7 @@ import pytest
 
 from src.modules.lane_detection import LaneDetectionModule
 from src.modules.yolop.inference import InferenceConfig, YOLOPInferenceEngine
-from src.modules.yolop.postprocess import resize_mask_to_frame
+from src.modules.yolop.mask_resize import resize_mask_to_frame
 
 
 def _synthetic_mcnet_sequence_outputs(
@@ -73,6 +73,16 @@ def wide_lane_module(
 
 class TestMaskResizeGeometry:
     """Geometry must use frame-space coordinates, not model-resolution masks."""
+
+    def test_run_pipeline_module_has_resize_helper(self) -> None:
+        assert hasattr(LaneDetectionModule, "_resize_masks_to_frame_shape")
+
+    def test_resize_mask_to_frame_importable_from_postprocess(self) -> None:
+        from src.modules.yolop.postprocess import resize_mask_to_frame as postprocess_resize
+
+        mask = np.zeros((640, 640), dtype=np.uint8)
+        resized = postprocess_resize(mask, 1024, 2048)
+        assert resized.shape == (1024, 2048)
 
     def test_resize_mask_to_frame_is_exported_from_yolop_package(self) -> None:
         from src.modules.yolop import resize_mask_to_frame as exported_resize

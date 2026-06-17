@@ -23,7 +23,8 @@ from .yolop.model_loader import (
 )
 from .yolop.output_parser import YOLOPOutputParser
 from .yolop.output_schema import LaneDetectionResult
-from .yolop.postprocess import postprocess_lane_mask, resize_mask_to_frame
+from .yolop.mask_resize import resize_mask_to_frame
+from .yolop.postprocess import postprocess_lane_mask
 from ..preprocessing.lane_preprocess import LanePreprocessor
 from ..utils.model_paths import get_yolop_weights_path
 
@@ -232,42 +233,18 @@ class LaneDetectionModule(BaseModule):
             self._log_debug("Lane mask post-processing applied")
 
         # Step 5: Resize masks to original frame dimensions before geometry.
-        # Must use frame.shape — not YOLOP input_size (640x640).
-        frame_height = int(frame.shape[0])
-        frame_width = int(frame.shape[1])
-        target_mask_shape = (frame_height, frame_width)
-
-        self._log_debug(
-            "Resizing masks from %s to frame shape %s",
-            lane_mask.shape if lane_mask is not None else None,
-            target_mask_shape,
-        )
-        lane_mask = resize_mask_to_frame(
+        lane_mask, drivable_mask = self._resize_masks_to_frame_shape(
             lane_mask,
-            frame_height=frame_height,
-            frame_width=frame_width,
-        )
-        drivable_mask = resize_mask_to_frame(
             drivable_mask,
-            frame_height=frame_height,
-            frame_width=frame_width,
+            frame,
         )
-        if lane_mask is not None and lane_mask.shape[:2] != target_mask_shape:
-            raise RuntimeError(
-                f"Lane mask resize failed: got {lane_mask.shape[:2]}, "
-                f"expected {target_mask_shape}"
-            )
-        if drivable_mask is not None and drivable_mask.shape[:2] != target_mask_shape:
-            raise RuntimeError(
-                f"Drivable mask resize failed: got {drivable_mask.shape[:2]}, "
-                f"expected {target_mask_shape}"
-            )
 
         # Step 6: Lane geometry extraction (frame-space coordinates)
         lane_center_x: float | None = None
         vehicle_center_x: float | None = None
         vehicle_offset: float | None = None
         lane_departure = False
+        frame_width = int(frame.shape[1])
 
         if lane_mask is not None:
             lane_center_x = self.geometry_extractor.compute_lane_center(lane_mask)
@@ -302,6 +279,47 @@ class LaneDetectionModule(BaseModule):
             result.vehicle_offset,
         )
         return result
+
+    def _resize_masks_to_frame_shape(
+        self,
+        lane_mask: np.ndarray | None,
+        drivable_mask: np.ndarray | None,
+        frame: Frame,
+    ) -> tuple[np.ndarray | None, np.ndarray | None]:
+        """Resize model-resolution masks to ``frame.shape[:2]``.
+
+        Uses ``mask_resize.resize_mask_to_frame`` so geometry and returned
+        masks are always in original frame pixel coordinates.
+        """
+        frame_height = int(frame.shape[0])
+        frame_width = int(frame.shape[1])
+        target_shape = (frame_height, frame_width)
+        lane_before = lane_mask.shape if lane_mask is not None else None
+
+        lane_resized = resize_mask_to_frame(lane_mask, frame_height, frame_width)
+        drivable_resized = resize_mask_to_frame(
+            drivable_mask,
+            frame_height,
+            frame_width,
+        )
+
+        if lane_resized is not None and lane_resized.shape[:2] != target_shape:
+            raise RuntimeError(
+                f"Lane mask resize failed: {lane_resized.shape[:2]} != {target_shape}"
+            )
+        if drivable_resized is not None and drivable_resized.shape[:2] != target_shape:
+            raise RuntimeError(
+                f"Drivable mask resize failed: "
+                f"{drivable_resized.shape[:2]} != {target_shape}"
+            )
+
+        self._log_info(
+            "Masks resized %s -> %s for frame %s",
+            lane_before,
+            lane_resized.shape if lane_resized is not None else None,
+            target_shape,
+        )
+        return lane_resized, drivable_resized
 
     def _validate_input(self, frame: Frame) -> None:
         """Validate input frame format."""

@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import cv2
 import numpy as np
 
 from .base import BaseModule, Frame
@@ -23,7 +24,6 @@ from .yolop.model_loader import (
 )
 from .yolop.output_parser import YOLOPOutputParser
 from .yolop.output_schema import LaneDetectionResult
-from .yolop.mask_resize import resize_mask_to_frame
 from .yolop.postprocess import postprocess_lane_mask
 from ..preprocessing.lane_preprocess import LanePreprocessor
 from ..utils.model_paths import get_yolop_weights_path
@@ -35,6 +35,9 @@ LANE_OUTPUT_KEYS = (
     "vehicle_offset",
     "lane_departure",
 )
+
+# Bump when pipeline semantics change (e.g. mask resize). Colab must match >= 2.
+LANE_DETECTION_PIPELINE_VERSION = 2
 
 
 class LaneDetectionModule(BaseModule):
@@ -278,7 +281,33 @@ class LaneDetectionModule(BaseModule):
             result.lane_center_x,
             result.vehicle_offset,
         )
+        self._assert_result_masks_match_frame(result, frame)
         return result
+
+    @staticmethod
+    def _assert_result_masks_match_frame(
+        result: LaneDetectionResult,
+        frame: Frame,
+    ) -> None:
+        """Fail fast if masks were not resized to the input frame (640-space bug)."""
+        target_shape = (int(frame.shape[0]), int(frame.shape[1]))
+
+        if result.lane_mask is not None and result.lane_mask.shape[:2] != target_shape:
+            raise RuntimeError(
+                f"Lane mask shape {result.lane_mask.shape[:2]} != frame {target_shape}. "
+                f"Expected pipeline version {LANE_DETECTION_PIPELINE_VERSION} with "
+                "_resize_masks_to_frame_shape active. Sync lane_detection.py and "
+                "restart the Python kernel."
+            )
+
+        if (
+            result.drivable_mask is not None
+            and result.drivable_mask.shape[:2] != target_shape
+        ):
+            raise RuntimeError(
+                f"Drivable mask shape {result.drivable_mask.shape[:2]} != frame "
+                f"{target_shape}. Sync lane_detection.py and restart the kernel."
+            )
 
     def _resize_masks_to_frame_shape(
         self,
@@ -288,20 +317,25 @@ class LaneDetectionModule(BaseModule):
     ) -> tuple[np.ndarray | None, np.ndarray | None]:
         """Resize model-resolution masks to ``frame.shape[:2]``.
 
-        Uses ``mask_resize.resize_mask_to_frame`` so geometry and returned
-        masks are always in original frame pixel coordinates.
+        Uses OpenCV directly so mask resize cannot fail due to a missing or
+        stale helper import in downstream environments.
         """
         frame_height = int(frame.shape[0])
         frame_width = int(frame.shape[1])
         target_shape = (frame_height, frame_width)
         lane_before = lane_mask.shape if lane_mask is not None else None
 
-        lane_resized = resize_mask_to_frame(lane_mask, frame_height, frame_width)
-        drivable_resized = resize_mask_to_frame(
-            drivable_mask,
-            frame_height,
-            frame_width,
-        )
+        def _resize(mask: np.ndarray | None) -> np.ndarray | None:
+            if mask is None:
+                return None
+            return cv2.resize(
+                np.asarray(mask, dtype=np.uint8),
+                (frame_width, frame_height),
+                interpolation=cv2.INTER_NEAREST,
+            )
+
+        lane_resized = _resize(lane_mask)
+        drivable_resized = _resize(drivable_mask)
 
         if lane_resized is not None and lane_resized.shape[:2] != target_shape:
             raise RuntimeError(

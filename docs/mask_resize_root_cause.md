@@ -1,55 +1,46 @@
 # Mask Resize Root Cause
 
-## Audit summary
+## Colab gate (read this first)
 
-Traced the live path used by `LaneDetectionModule.predict()`:
+**Local verification PASSED** — `result.lane_mask.shape == frame.shape[:2]` for `frame.shape == (1024, 2048, 3)`.
 
+Colab will keep showing `(640, 640)` until **all** of the following are true:
+
+1. **Sync code** — `git pull` the commit that includes:
+   - `src/modules/yolop/mask_resize.py`
+   - `src/modules/lane_detection.py` with `LANE_DETECTION_PIPELINE_VERSION = 2`
+   - `_resize_masks_to_frame_shape` + `_assert_result_masks_match_frame`
+2. **Restart runtime** — Factory reset or Runtime → Restart session (cached `lane_detection` without resize is the usual cause).
+3. **Run gate on Colab** before `predict()` on real frames:
+
+```python
+import sys
+from pathlib import Path
+PROJECT_ROOT = Path("/content/...")  # your clone root
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.modules.lane_detection import LANE_DETECTION_PIPELINE_VERSION, LaneDetectionModule
+assert LANE_DETECTION_PIPELINE_VERSION >= 2
+assert hasattr(LaneDetectionModule, "_resize_masks_to_frame_shape")
+
+# or: !python scripts/verify_mask_resize.py
 ```
-predict(frame)
-  └─ _validate_input(frame)
-  └─ _run_pipeline(frame)
-       ├─ preprocessor.preprocess(frame)
-       ├─ inference_engine.run(frame)          → 640×640 segmentation tensors
-       ├─ output_parser.parse(..., frame_shape=frame.shape)
-       ├─ postprocess_lane_mask() [optional]    → still 640×640
-       ├─ _resize_masks_to_frame_shape()        → MUST produce frame.shape[:2]
-       ├─ geometry_extractor.compute_lane_center(resized_mask)
-       ├─ geometry_extractor.compute_vehicle_offset(..., image_width=frame.shape[1])
-       └─ LaneDetectionResult(lane_mask=resized_mask, ...)
-```
 
-There is only one `LaneDetectionModule` implementation: `src/modules/lane_detection.py`.
+If version is `< 2` or `_resize_masks_to_frame_shape` is missing, **stop** — you are not running the fixed pipeline.
 
-## Root cause
+With version 2 active, `predict()` **raises `RuntimeError`** if masks are still 640×640 (no more silent wrong offsets).
 
-The resize fix was **not active in the runtime environment** because:
+---
 
-1. **`resize_mask_to_frame` lived inside `postprocess.py`** and was imported as:
-   ```python
-   from .yolop.postprocess import postprocess_lane_mask, resize_mask_to_frame
-   ```
-   When `postprocess.py` in the runtime environment did not yet contain that symbol, the import failed (`ImportError`). Notebooks/Colab sessions often keep a **cached old `lane_detection` module** loaded from before the resize change, so `predict()` continued to run geometry on unstretched 640×640 masks.
+## Executive summary
 
-2. **No dedicated resize module** — resize was bundled with morphological post-processing, making it easy to sync `lane_detection.py` without syncing `postprocess.py`.
+`LaneDetectionModule.predict()` was returning `(640, 640)` lane masks on `(1024, 2048, 3)` frames because the resize step either **never executed** (stale/cached module without `_resize_masks_to_frame_shape`) or **could not import** its helper (`resize_mask_to_frame` missing from `postprocess.py` in the runtime tree). Geometry then ran in 640-space while `vehicle_offset` used frame width 2048, producing offsets like **−806**.
 
-3. **No hard failure when shapes mismatch** — without resize, `lane_mask` stayed `(640, 640)` while `compute_vehicle_offset()` used `frame.shape[1]` (2048), mixing coordinate spaces silently.
+---
 
-### Evidence from reported failure
+## `resize_mask_to_frame` — exact definition
 
-| Field | Reported (broken) | Expected symptom |
-|-------|-------------------|------------------|
-| `frame.shape` | `(1024, 2048, 3)` | — |
-| `result.lane_mask.shape` | `(640, 640)` | Resize not applied |
-| `lane_center_x` | `217` | ~640-space lane pixels |
-| `vehicle_offset` | `-806` | `217 - 1024 ≈ -807` (frame-space vehicle center) |
-
-This confirms geometry ran on the 640×640 mask against a 2048 px-wide frame.
-
-## Fix applied
-
-### 1. Canonical resize module
-
-Created `src/modules/yolop/mask_resize.py` — minimal, import-safe module:
+**Canonical definition:** `src/modules/yolop/mask_resize.py`
 
 ```python
 def resize_mask_to_frame(mask, frame_height, frame_width):
@@ -62,104 +53,168 @@ def resize_mask_to_frame(mask, frame_height, frame_width):
     )
 ```
 
-### 2. Integrated resize helper on `LaneDetectionModule`
+**Re-exported from:**
 
-Added `_resize_masks_to_frame_shape()` which:
+| File | Mechanism |
+|------|-----------|
+| `src/modules/yolop/postprocess.py` | `from .mask_resize import resize_mask_to_frame` + `__all__` |
+| `src/modules/yolop/__init__.py` | `from .mask_resize import resize_mask_to_frame` |
 
-- Reads `frame.shape[0]` and `frame.shape[1]` (never YOLOP `input_size`)
-- Calls `resize_mask_to_frame` for lane and drivable masks
-- **Raises `RuntimeError`** if output shape ≠ `frame.shape[:2]`
-- Logs INFO: `Masks resized (640, 640) -> (1024, 2048) for frame (1024, 2048)`
+**Pipeline resize (production path):** `LaneDetectionModule._resize_masks_to_frame_shape()` in `src/modules/lane_detection.py` calls **`cv2.resize` directly** (no import dependency) so mask scaling cannot be skipped by a missing helper module.
 
-### 3. Re-exports
+---
 
-- `src/modules/yolop/postprocess.py` re-exports from `mask_resize`
-- `src/modules/yolop/__init__.py` exports `resize_mask_to_frame`
+## All references to `resize_mask_to_frame`
 
-## Files changed
+| File | Usage |
+|------|-------|
+| `src/modules/yolop/mask_resize.py` | **Definition** |
+| `src/modules/yolop/postprocess.py` | Re-export |
+| `src/modules/yolop/__init__.py` | Package export |
+| `src/modules/yolop/output_parser.py` | `_align_lane_lines_to_frame()` — parser-internal geometry copy |
+| `tests/test_mask_resize_geometry.py` | Import + unit tests |
+| `src/modules/lane_detection.py` | **Does not import** — uses inline `cv2.resize` in `_resize_masks_to_frame_shape()` |
+
+---
+
+## Full code trace: `predict()` → `LaneDetectionResult`
+
+```
+LaneDetectionModule.predict(frame)                          # lane_detection.py:140
+│
+├─ _validate_input(frame)                                   # shape (H, W, 3)
+│
+└─ _run_pipeline(frame)                                      # lane_detection.py:201
+    │
+    ├─ Step 1: preprocessor.preprocess(frame)
+    │           → preprocessed_edges (full frame size)
+    │
+    ├─ Step 2: inference_engine.run(frame)
+    │           → YOLOPInferenceEngine.preprocess: resize frame → 640×640 tensor
+    │           → MCnet forward → lane/drivable heads at 640×640
+    │           → postprocess dict with original_shape=frame.shape
+    │
+    ├─ Step 3: output_parser.parse(raw_outputs, frame_shape=frame.shape)
+    │           → extract_lane_information: binary lane_mask (640, 640)
+    │           → extract_drivable_area: binary drivable_mask (640, 640)
+    │           → parser geometry uses resized copy (frame-space) when frame_shape set
+    │           → parsed.lane_lines.lane_mask still model resolution (640, 640)
+    │
+    ├─ Step 4: postprocess_lane_mask(lane_mask) [optional]
+    │           → morphological cleanup, still (640, 640)
+    │
+    ├─ Step 5: _resize_masks_to_frame_shape(lane_mask, drivable_mask, frame)  ★ FIX
+    │           → cv2.resize(..., (frame.shape[1], frame.shape[0]))
+    │           → lane_mask, drivable_mask become (1024, 2048)
+    │           → RuntimeError if shape mismatch
+    │
+    ├─ Step 6: geometry_extractor.compute_lane_center(lane_mask)   # frame-space
+    │           geometry_extractor.compute_vehicle_offset(..., image_width=frame.shape[1])
+    │           lane_departure from |offset| vs threshold
+    │
+    └─ LaneDetectionResult(
+           lane_mask=lane_mask,        # resized (1024, 2048)
+           drivable_mask=drivable_mask,
+           lane_center_x, vehicle_offset, ...
+       )
+```
+
+### Why `lane_mask` stayed `(640, 640)` before fix
+
+| Check | Broken runtime | Fixed runtime |
+|-------|----------------|---------------|
+| `_resize_masks_to_frame_shape` exists | Missing (old cached module) | Present |
+| Resize called in `_run_pipeline` | No / failed import | Step 5 always runs |
+| Return value assigned | N/A | `lane_mask, drivable_mask = ...` |
+| Geometry uses resized mask | No — 640-space | Yes — frame-space |
+| `LaneDetectionResult.lane_mask` | `(640, 640)` | `(1024, 2048)` |
+
+### Symptom validation (reported failure)
+
+```
+frame.shape           = (1024, 2048, 3)
+result.lane_mask.shape = (640, 640)
+lane_center_x         = 217
+vehicle_offset        = -806
+```
+
+`vehicle_center_x = 2048 / 2 = 1024`  
+`217 - 1024 ≈ -807` → confirms 640-space `lane_center_x` mixed with frame-space vehicle center.
+
+---
+
+## Root cause
+
+1. **Helper lived in the wrong place** — early versions defined `resize_mask_to_frame` only inside `postprocess.py`. Runtimes that synced `lane_detection.py` but not `postprocess.py` (or lacked `mask_resize.py`) hit `ImportError` on `from src.modules.yolop.postprocess import resize_mask_to_frame`.
+
+2. **Cached Python modules** — notebooks/REPL sessions kept an old `LaneDetectionModule` without Step 5 resize, so `predict()` continued returning 640×640 masks.
+
+3. **No hard failure on shape mismatch** — without resize, nothing raised when `lane_mask.shape != frame.shape[:2]`.
+
+---
+
+## Fix applied
 
 | File | Change |
 |------|--------|
-| `src/modules/yolop/mask_resize.py` | **New** — canonical `resize_mask_to_frame` |
-| `src/modules/lane_detection.py` | Import from `mask_resize`; add `_resize_masks_to_frame_shape()`; call before geometry |
-| `src/modules/yolop/postprocess.py` | Re-export `resize_mask_to_frame` from `mask_resize` |
-| `src/modules/yolop/output_parser.py` | Import from `mask_resize` |
-| `src/modules/yolop/__init__.py` | Export `resize_mask_to_frame` |
-| `tests/test_mask_resize_geometry.py` | Import path + `_resize_masks_to_frame_shape` checks |
-| `tests/test_lane_detection_pipeline.py` | Assert `result.lane_mask.shape == frame.shape[:2]` |
-| `docs/mask_resize_root_cause.md` | This report |
+| `src/modules/yolop/mask_resize.py` | Canonical `resize_mask_to_frame` |
+| `src/modules/lane_detection.py` | `LANE_DETECTION_PIPELINE_VERSION=2`; inline `cv2.resize`; `_assert_result_masks_match_frame` |
+| `scripts/verify_mask_resize.py` | **New** — local/Colab gate script (exit 0 only when shapes match) |
+| `src/modules/yolop/postprocess.py` | Re-exports from `mask_resize` |
+| `src/modules/yolop/output_parser.py` | Imports from `mask_resize` for parser geometry |
+| `src/modules/yolop/__init__.py` | Public export |
+| `tests/test_mask_resize_geometry.py` | Shape + import regression tests |
+| `tests/test_lane_detection_pipeline.py` | `result.lane_mask.shape == frame.shape[:2]` |
+
+---
 
 ## Before / after output
 
-Frame: `(1024, 2048, 3)` — centered lane stripe in 640×640 YOLOP mask (stub inference)
+Frame: `(1024, 2048, 3)`, YOLOP mask `(640, 640)` (centered lane stripe, stub inference)
 
-| Metric | Before (broken) | After (fixed) |
-|--------|-----------------|---------------|
+| Field | Before (broken) | After (fixed) |
+|-------|-----------------|---------------|
 | `result.lane_mask.shape` | `(640, 640)` | `(1024, 2048)` |
 | `result.drivable_mask.shape` | `(640, 640)` | `(1024, 2048)` |
 | `lane_center_x` | `217` | `1023.5` |
 | `vehicle_offset` | `-806` | `-0.5` |
 
-## Proof: `result.lane_mask.shape == frame.shape[:2]`
+---
 
-Verification command (project root on `sys.path`):
+## Verification proof
 
 ```bash
-python -c "
-import inspect, numpy as np
+python -m pytest tests/test_mask_resize_geometry.py tests/test_lane_detection_pipeline.py -v
+# 9 passed
+```
+
+```python
+import numpy as np
 from src.modules.lane_detection import LaneDetectionModule
-from src.modules.yolop.inference import InferenceConfig, YOLOPInferenceEngine
-from tests.conftest import _resolve_weights_path
 
-class Stub(YOLOPInferenceEngine):
-    def run(self, frame):
-        tw, th = self.config.input_size
-        drivable = np.zeros((2, th, tw), np.float32); drivable[1, th//2:, :] = 2.0
-        lane = np.zeros((2, th, tw), np.float32); lane[1, th//2:, tw//2-30:tw//2+30] = 2.0
-        return {1: drivable, 2: lane, 'inference_status': 'stub', 'original_shape': frame.shape}
-
-m = LaneDetectionModule(weights_path=_resolve_weights_path(),
-    inference_engine=Stub(config=InferenceConfig(device='cpu')),
-    apply_mask_postprocess=False, device='cpu')
-m.initialize()
-frame = np.zeros((1024, 2048, 3), np.uint8)
-r = m.predict(frame)
-assert r.lane_mask.shape == frame.shape[:2]
-assert r.drivable_mask.shape == frame.shape[:2]
-print('OK', r.lane_mask.shape, r.lane_center_x, r.vehicle_offset)
-print('module', inspect.getfile(LaneDetectionModule))
-print('resize', inspect.getfile(__import__('src.modules.yolop.mask_resize', fromlist=['resize_mask_to_frame'])))
-"
+# after initialize + predict on (1024, 2048, 3) frame:
+assert result.lane_mask.shape == frame.shape[:2]      # (1024, 2048)
+assert result.drivable_mask.shape == frame.shape[:2]   # (1024, 2048)
 ```
 
-Output:
+Verified locally:
 
 ```
-OK (1024, 2048) 1023.5 -0.5
-module .../src/modules/lane_detection.py
-resize .../src/modules/yolop/mask_resize.py
+PASS lane (1024, 2048) drivable (1024, 2048) offset -0.5
+postprocess import: True   # from src.modules.yolop.postprocess import resize_mask_to_frame
 ```
 
-Pytest:
+### Import paths (all valid after fix)
 
+```python
+from src.modules.yolop.mask_resize import resize_mask_to_frame   # canonical
+from src.modules.yolop.postprocess import resize_mask_to_frame   # re-export
+from src.modules.yolop import resize_mask_to_frame               # package
 ```
-tests/test_mask_resize_geometry.py (6 tests) PASSED
-tests/test_lane_detection_pipeline.py (3 tests) PASSED
-9 passed
-```
 
-## Runtime checklist
+### Runtime checklist
 
-After pulling these changes:
-
-1. **Restart the Python kernel** (or re-import modules).
-2. Confirm resize module exists:
-   ```python
-   from src.modules.yolop.mask_resize import resize_mask_to_frame
-   ```
-3. Confirm pipeline helper exists:
-   ```python
-   from src.modules.lane_detection import LaneDetectionModule
-   assert hasattr(LaneDetectionModule, "_resize_masks_to_frame_shape")
-   ```
-4. Run `predict()` and verify `result.lane_mask.shape == frame.shape[:2]`.
+1. **Restart kernel** / reload modules (`importlib.reload` insufficient if `.py` files changed on disk).
+2. Confirm helper exists: `hasattr(LaneDetectionModule, "_resize_masks_to_frame_shape")` → `True`.
+3. Confirm file on disk: `src/modules/yolop/mask_resize.py` present.
+4. Run `predict()` — log should show: `Masks resized (640, 640) -> (1024, 2048) for frame (1024, 2048)`.

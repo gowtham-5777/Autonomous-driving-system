@@ -7,6 +7,8 @@ import numpy as np
 
 MaskArray = np.ndarray
 
+__all__ = ["resize_mask_to_frame"]
+
 
 def resize_mask_to_frame(
     mask: MaskArray | None,

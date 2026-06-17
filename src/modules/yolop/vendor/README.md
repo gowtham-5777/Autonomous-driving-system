@@ -31,6 +31,10 @@ Mask post-processing is handled by `src/modules/yolop/postprocess.py`.
 ## Public API
 
 ```python
+# Inside vendor package (relative):
+from .models import get_net, MCnet
+
+# From ADAS integration layer (project root on sys.path):
 from src.modules.yolop.vendor import get_net, MCnet
 ```
 

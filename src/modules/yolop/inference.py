@@ -1,9 +1,8 @@
 """YOLOP inference wrapper — integration layer for forward-pass execution.
 
 Provides a production-ready interface for preprocessing frames, executing
-YOLOP inference, and post-processing raw multi-head outputs.  The actual
-YOLOP network forward pass is stubbed until the upstream architecture is
-integrated.
+YOLOP inference via the vendored MCnet architecture, and post-processing raw
+multi-head outputs.
 """
 
 from __future__ import annotations
@@ -14,6 +13,10 @@ from typing import Any
 
 import cv2
 import numpy as np
+import torch
+import torch.nn as nn
+
+from src.modules.yolop.vendor import get_net
 
 logger = logging.getLogger("adas.modules.yolop.inference")
 
@@ -39,6 +42,10 @@ class InferenceExecutionError(RuntimeError):
     """Raised when the forward pass fails unexpectedly."""
 
 
+class StateDictMissingError(ValueError):
+    """Raised when a model package does not contain weight tensors."""
+
+
 @dataclass(frozen=True)
 class InferenceConfig:
     """Configuration for YOLOP inference preprocessing and postprocessing.
@@ -58,12 +65,13 @@ class YOLOPInferenceEngine:
     """Execute YOLOP inference on video frames.
 
     Accepts a loaded model package from ``YOLOPModelLoader.get_model()``,
-    validates and preprocesses BGR frames, runs the forward pass (stubbed),
-    and returns standardized raw outputs for downstream parsing.
+    validates and preprocesses BGR frames, runs the vendored MCnet forward
+    pass, and returns standardized raw outputs for downstream parsing.
 
     Attributes:
         config: Inference configuration parameters.
         model_package: Loaded checkpoint package (or ``None``).
+        _model: Instantiated MCnet module when architecture is ready.
     """
 
     def __init__(
@@ -80,6 +88,7 @@ class YOLOPInferenceEngine:
         """
         self.config = config or InferenceConfig()
         self.model_package: ModelPackage | None = None
+        self._model: nn.Module | None = None
         self._architecture_ready = False
 
         if model_package is not None:
@@ -98,12 +107,17 @@ class YOLOPInferenceEngine:
     def attach_model(self, model_package: ModelPackage) -> None:
         """Attach a loaded YOLOP model package for inference.
 
+        Instantiates the vendored MCnet architecture, loads checkpoint weights,
+        and moves the network to the configured inference device.
+
         Args:
             model_package: Dictionary from ``YOLOPModelLoader.get_model()``
                 containing ``checkpoint``, ``state_dict``, and ``metadata``.
 
         Raises:
             ValueError: If the package is missing required keys.
+            StateDictMissingError: If ``state_dict`` is missing or empty.
+            InferenceExecutionError: If model construction or weight loading fails.
         """
         required_keys = {"checkpoint", "state_dict", "metadata"}
         missing = required_keys - set(model_package.keys())
@@ -112,26 +126,74 @@ class YOLOPInferenceEngine:
                 f"Invalid model package — missing keys: {sorted(missing)}"
             )
 
+        state_dict = model_package.get("state_dict")
+        if not state_dict:
+            raise StateDictMissingError(
+                "Invalid model package — state_dict is missing or empty"
+            )
+
         self.model_package = model_package
+        self._model = None
         self._architecture_ready = False
 
-        # TODO: Instantiate YOLOP network architecture and load state_dict.
-        # TODO: Move instantiated model to self.config.device and set eval mode.
+        device = self._resolve_device()
+        logger.info("Instantiating vendored MCnet via get_net()")
+        try:
+            model = get_net(cfg=None)
+        except Exception as exc:
+            logger.exception("YOLOP MCnet instantiation failed")
+            raise InferenceExecutionError(
+                f"YOLOP MCnet instantiation failed: {exc}"
+            ) from exc
+
         logger.info(
-            "YOLOP model package attached — %d state_dict tensor(s)",
-            len(model_package.get("state_dict", {})),
+            "Loading YOLOP state_dict — %d tensor(s)",
+            len(state_dict),
+        )
+        try:
+            load_result = model.load_state_dict(state_dict, strict=True)
+        except RuntimeError as strict_exc:
+            logger.warning(
+                "Strict state_dict load failed (%s) — retrying with strict=False",
+                strict_exc,
+            )
+            load_result = model.load_state_dict(state_dict, strict=False)
+
+        if load_result.missing_keys or load_result.unexpected_keys:
+            logger.warning(
+                "state_dict load — missing=%s unexpected=%s",
+                load_result.missing_keys,
+                load_result.unexpected_keys,
+            )
+        else:
+            logger.info("state_dict loaded successfully with strict=True")
+
+        logger.info("Moving MCnet to device %s", device)
+        model = model.to(device)
+        model.eval()
+
+        self._model = model
+        self._architecture_ready = True
+        logger.info(
+            "YOLOP model attached — architecture_ready=True, device=%s",
+            device,
         )
 
     def detach_model(self) -> None:
         """Detach the current model package and release references."""
         logger.info("Detaching YOLOP model package from inference engine")
         self.model_package = None
+        self._model = None
         self._architecture_ready = False
 
     @property
     def is_ready(self) -> bool:
-        """Return whether a model package is attached."""
-        return self.model_package is not None
+        """Return whether a model package is attached and architecture is loaded."""
+        return (
+            self.model_package is not None
+            and self._model is not None
+            and self._architecture_ready
+        )
 
     # ------------------------------------------------------------------
     # Public inference pipeline
@@ -205,8 +267,9 @@ class YOLOPInferenceEngine:
             InferenceExecutionError: If the forward pass fails.
         """
         if not self.is_ready:
-            logger.warning("Inference run() called without attached model — returning empty output")
-            return self.empty_output()
+            raise InferenceNotReadyError(
+                "YOLOP inference engine is not ready — attach a model package first"
+            )
 
         self._validate_frame(frame)
         logger.info("Running YOLOP inference pipeline")
@@ -251,7 +314,7 @@ class YOLOPInferenceEngine:
             "confidence_threshold": self.config.confidence_threshold,
             "original_shape": preprocessed.get("original_shape"),
             "input_size": preprocessed.get("input_size"),
-            "inference_status": outputs.get("status", "stub"),
+            "inference_status": outputs.get("status", "unknown"),
         }
 
     # ------------------------------------------------------------------
@@ -285,40 +348,71 @@ class YOLOPInferenceEngine:
             raise InvalidFrameError("Input frame is empty")
 
     def _execute_forward(self, preprocessed: PreprocessedInput) -> RawForwardOutput:
-        """Execute the YOLOP forward pass (stub).
+        """Execute the YOLOP forward pass on preprocessed input.
 
         Args:
             preprocessed: Model-ready input from ``preprocess()``.
 
         Returns:
-            Raw forward output dictionary with placeholder head outputs.
+            Raw forward output dictionary with lane, drivable, and detection heads.
 
         Raises:
+            InferenceNotReadyError: If the MCnet model is not attached.
             InferenceExecutionError: If forward execution fails.
         """
-        assert self.model_package is not None
+        if self._model is None or not self._architecture_ready:
+            raise InferenceNotReadyError(
+                "YOLOP MCnet model is not attached — call attach_model() first"
+            )
 
-        input_tensor = preprocessed["input_tensor"]
-        logger.debug(
-            "Forward pass stub — input_tensor shape %s, device=%s",
-            input_tensor.shape,
-            self.config.device,
+        device = self._resolve_device()
+        input_array = preprocessed["input_tensor"]
+        logger.info(
+            "Executing YOLOP forward pass — input_shape=%s, device=%s",
+            tuple(input_array.shape),
+            device,
         )
 
         try:
-            # TODO: Convert input_tensor to torch.Tensor on self.config.device.
-            # TODO: Run YOLOP model forward pass with torch.no_grad().
-            # TODO: Capture lane, drivable, and detection head outputs.
+            input_tensor = torch.as_tensor(
+                input_array,
+                dtype=torch.float32,
+                device=device,
+            )
+            if input_tensor.ndim == 3:
+                input_tensor = input_tensor.unsqueeze(0)
+
+            with torch.no_grad():
+                outputs = self._model(input_tensor)
+
+            det_out, drivable_head, lane_head = outputs
+            logger.info(
+                "YOLOP forward pass complete — det=%s, drivable=%s, lane=%s",
+                type(det_out).__name__,
+                tuple(drivable_head.shape),
+                tuple(lane_head.shape),
+            )
+
             return {
-                "lane_head": None,
-                "drivable_head": None,
-                "detection_head": None,
-                "status": "stub",
-                "state_dict_keys": len(self.model_package.get("state_dict", {})),
+                "lane_head": lane_head,
+                "drivable_head": drivable_head,
+                "detection_head": det_out,
+                "status": "ok",
+                "raw_outputs": outputs,
             }
+        except InferenceNotReadyError:
+            raise
         except Exception as exc:
             logger.exception("YOLOP forward pass failed")
             raise InferenceExecutionError(f"YOLOP forward pass failed: {exc}") from exc
+
+    def _resolve_device(self) -> torch.device:
+        """Resolve the configured inference device string to ``torch.device``."""
+        device_name = self.config.device
+        if device_name == "cuda" and not torch.cuda.is_available():
+            logger.warning("CUDA requested but unavailable — falling back to CPU")
+            return torch.device("cpu")
+        return torch.device(device_name)
 
     @staticmethod
     def empty_output() -> YOLOPRawOutput:

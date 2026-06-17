@@ -52,7 +52,7 @@ class _WideFrameStubInferenceEngine(YOLOPInferenceEngine):
 @pytest.fixture
 def wide_frame() -> np.ndarray:
     """Wide frame whose width differs from the 640px YOLOP mask."""
-    return np.zeros((720, 2048, 3), dtype=np.uint8)
+    return np.zeros((1024, 2048, 3), dtype=np.uint8)
 
 
 @pytest.fixture
@@ -74,6 +74,14 @@ def wide_lane_module(
 class TestMaskResizeGeometry:
     """Geometry must use frame-space coordinates, not model-resolution masks."""
 
+    def test_resize_mask_to_frame_is_exported_from_yolop_package(self) -> None:
+        from src.modules.yolop import resize_mask_to_frame as exported_resize
+
+        mask = np.zeros((640, 640), dtype=np.uint8)
+        resized = exported_resize(mask, frame_height=1024, frame_width=2048)
+        assert resized is not None
+        assert resized.shape == (1024, 2048)
+
     def test_resize_mask_to_frame_scales_dimensions(self) -> None:
         mask = np.zeros((640, 640), dtype=np.uint8)
         mask[320:, 310:330] = 255
@@ -91,13 +99,18 @@ class TestMaskResizeGeometry:
         """Centered 640px lane stripe should map near frame center after resize."""
         assert wide_frame.shape[:2] != (640, 640)
 
+        assert wide_frame.shape == (1024, 2048, 3)
+        assert wide_frame.shape[:2] != (640, 640)
+
         result = wide_lane_module.predict(wide_frame)
 
-        frame_width = wide_frame.shape[1]
+        frame_height, frame_width = wide_frame.shape[:2]
         expected_vehicle_center = frame_width / 2.0
 
         assert result.lane_mask is not None
-        assert result.lane_mask.shape[:2] == wide_frame.shape[:2]
+        assert result.lane_mask.shape == (frame_height, frame_width)
+        assert result.drivable_mask is not None
+        assert result.drivable_mask.shape == (frame_height, frame_width)
         assert result.lane_center_x is not None
         assert result.vehicle_offset is not None
         assert result.vehicle_center_x == expected_vehicle_center
@@ -111,7 +124,7 @@ class TestMaskResizeGeometry:
         from src.modules.yolop.output_parser import YOLOPOutputParser
 
         parser = YOLOPOutputParser()
-        frame_shape = (720, 2048, 3)
+        frame_shape = (1024, 2048, 3)
         parsed = parser.parse(
             _synthetic_mcnet_sequence_outputs(),
             frame_shape=frame_shape,

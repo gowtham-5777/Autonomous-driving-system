@@ -38,6 +38,7 @@ from .postprocess import (
     connected_components_analysis,
     morphological_process,
     postprocess_lane_mask,
+    resize_mask_to_frame,
 )
 from .output_parser import ParserConfig, YOLOPOutputParser
 from .output_schema import (
@@ -81,6 +82,7 @@ __all__ = [
     "connected_components_analysis",
     "ConnectedComponentsResult",
     "postprocess_lane_mask",
+    "resize_mask_to_frame",
     "ParsedYOLOPOutput",
     "LaneLineData",
     "DrivableAreaData",

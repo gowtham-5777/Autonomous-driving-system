@@ -25,6 +25,50 @@ MorphologyOp = int
 
 DEFAULT_MIN_COMPONENT_AREA = 400
 
+__all__ = [
+    "ConnectedComponentsResult",
+    "connect_lane",
+    "connected_components_analysis",
+    "morphological_process",
+    "postprocess_lane_mask",
+    "resize_mask_to_frame",
+]
+
+
+def resize_mask_to_frame(
+    mask: ImageArray | None,
+    frame_height: int,
+    frame_width: int,
+) -> ImageArray | None:
+    """Resize a binary mask from model resolution to original frame dimensions.
+
+    Args:
+        mask: Binary segmentation mask at model input resolution.
+        frame_height: Original frame height ``H`` (``frame.shape[0]``).
+        frame_width: Original frame width ``W`` (``frame.shape[1]``).
+
+    Returns:
+        Mask with shape ``(frame_height, frame_width)``, or ``None`` when
+        ``mask`` is ``None``.
+    """
+    if mask is None:
+        return None
+
+    resized = cv2.resize(
+        np.asarray(mask, dtype=np.uint8),
+        (int(frame_width), int(frame_height)),
+        interpolation=cv2.INTER_NEAREST,
+    )
+
+    logger.debug(
+        "resize_mask_to_frame — %s -> %s (target=%dx%d)",
+        mask.shape,
+        resized.shape,
+        frame_height,
+        frame_width,
+    )
+    return resized
+
 
 @dataclass(frozen=True)
 class ConnectedComponentsResult:
@@ -197,44 +241,6 @@ def connect_lane(
         )
 
     return output_mask
-
-
-def resize_mask_to_frame(
-    mask: ImageArray | None,
-    frame_height: int,
-    frame_width: int,
-) -> ImageArray | None:
-    """Resize a binary mask from model resolution to original frame dimensions.
-
-    Uses nearest-neighbor interpolation to preserve hard class boundaries.
-
-    Args:
-        mask: Binary segmentation mask at model input resolution.
-        frame_height: Target height in pixels (original frame ``H``).
-        frame_width: Target width in pixels (original frame ``W``).
-
-    Returns:
-        Resized mask with shape ``(frame_height, frame_width)``, or ``None``
-        when ``mask`` is ``None``.
-    """
-    if mask is None:
-        return None
-
-    if mask.shape[0] == frame_height and mask.shape[1] == frame_width:
-        return mask
-
-    resized = cv2.resize(
-        mask,
-        (frame_width, frame_height),
-        interpolation=cv2.INTER_NEAREST,
-    )
-
-    logger.debug(
-        "resize_mask_to_frame — %s -> %s",
-        mask.shape,
-        resized.shape,
-    )
-    return resized
 
 
 def postprocess_lane_mask(

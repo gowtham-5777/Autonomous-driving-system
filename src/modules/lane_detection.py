@@ -231,10 +231,37 @@ class LaneDetectionModule(BaseModule):
             lane_mask = postprocess_lane_mask(lane_mask)
             self._log_debug("Lane mask post-processing applied")
 
-        # Step 5: Resize masks to original frame dimensions before geometry
-        frame_height, frame_width = frame.shape[:2]
-        lane_mask = resize_mask_to_frame(lane_mask, frame_height, frame_width)
-        drivable_mask = resize_mask_to_frame(drivable_mask, frame_height, frame_width)
+        # Step 5: Resize masks to original frame dimensions before geometry.
+        # Must use frame.shape — not YOLOP input_size (640x640).
+        frame_height = int(frame.shape[0])
+        frame_width = int(frame.shape[1])
+        target_mask_shape = (frame_height, frame_width)
+
+        self._log_debug(
+            "Resizing masks from %s to frame shape %s",
+            lane_mask.shape if lane_mask is not None else None,
+            target_mask_shape,
+        )
+        lane_mask = resize_mask_to_frame(
+            lane_mask,
+            frame_height=frame_height,
+            frame_width=frame_width,
+        )
+        drivable_mask = resize_mask_to_frame(
+            drivable_mask,
+            frame_height=frame_height,
+            frame_width=frame_width,
+        )
+        if lane_mask is not None and lane_mask.shape[:2] != target_mask_shape:
+            raise RuntimeError(
+                f"Lane mask resize failed: got {lane_mask.shape[:2]}, "
+                f"expected {target_mask_shape}"
+            )
+        if drivable_mask is not None and drivable_mask.shape[:2] != target_mask_shape:
+            raise RuntimeError(
+                f"Drivable mask resize failed: got {drivable_mask.shape[:2]}, "
+                f"expected {target_mask_shape}"
+            )
 
         # Step 6: Lane geometry extraction (frame-space coordinates)
         lane_center_x: float | None = None

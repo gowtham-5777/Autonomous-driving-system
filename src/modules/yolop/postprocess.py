@@ -199,6 +199,44 @@ def connect_lane(
     return output_mask
 
 
+def resize_mask_to_frame(
+    mask: ImageArray | None,
+    frame_height: int,
+    frame_width: int,
+) -> ImageArray | None:
+    """Resize a binary mask from model resolution to original frame dimensions.
+
+    Uses nearest-neighbor interpolation to preserve hard class boundaries.
+
+    Args:
+        mask: Binary segmentation mask at model input resolution.
+        frame_height: Target height in pixels (original frame ``H``).
+        frame_width: Target width in pixels (original frame ``W``).
+
+    Returns:
+        Resized mask with shape ``(frame_height, frame_width)``, or ``None``
+        when ``mask`` is ``None``.
+    """
+    if mask is None:
+        return None
+
+    if mask.shape[0] == frame_height and mask.shape[1] == frame_width:
+        return mask
+
+    resized = cv2.resize(
+        mask,
+        (frame_width, frame_height),
+        interpolation=cv2.INTER_NEAREST,
+    )
+
+    logger.debug(
+        "resize_mask_to_frame — %s -> %s",
+        mask.shape,
+        resized.shape,
+    )
+    return resized
+
+
 def postprocess_lane_mask(
     lane_mask: ImageArray,
     kernel_size: int = 5,

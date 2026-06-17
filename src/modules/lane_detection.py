@@ -23,7 +23,7 @@ from .yolop.model_loader import (
 )
 from .yolop.output_parser import YOLOPOutputParser
 from .yolop.output_schema import LaneDetectionResult
-from .yolop.postprocess import postprocess_lane_mask
+from .yolop.postprocess import postprocess_lane_mask, resize_mask_to_frame
 from ..preprocessing.lane_preprocess import LanePreprocessor
 from ..utils.model_paths import get_yolop_weights_path
 
@@ -226,25 +226,35 @@ class LaneDetectionModule(BaseModule):
         lane_mask = parsed.lane_lines.lane_mask
         drivable_mask = parsed.drivable_area.mask
 
-        # Step 4: Optional mask post-processing
+        # Step 4: Optional mask post-processing (model resolution)
         if lane_mask is not None and self.apply_mask_postprocess:
             lane_mask = postprocess_lane_mask(lane_mask)
             self._log_debug("Lane mask post-processing applied")
 
-        # Step 5: Lane geometry extraction
+        # Step 5: Resize masks to original frame dimensions before geometry
+        frame_height, frame_width = frame.shape[:2]
+        lane_mask = resize_mask_to_frame(lane_mask, frame_height, frame_width)
+        drivable_mask = resize_mask_to_frame(drivable_mask, frame_height, frame_width)
+
+        # Step 6: Lane geometry extraction (frame-space coordinates)
         lane_center_x: float | None = None
         vehicle_center_x: float | None = None
         vehicle_offset: float | None = None
+        lane_departure = False
 
         if lane_mask is not None:
             lane_center_x = self.geometry_extractor.compute_lane_center(lane_mask)
             if lane_center_x is not None:
                 offset_result = self.geometry_extractor.compute_vehicle_offset(
                     lane_center_x=lane_center_x,
-                    image_width=frame.shape[1],
+                    image_width=frame_width,
                 )
                 vehicle_center_x = offset_result.vehicle_center_x
                 vehicle_offset = offset_result.offset_pixels
+                lane_departure = (
+                    abs(vehicle_offset)
+                    > self.output_parser.config.departure_threshold_px
+                )
 
         result = LaneDetectionResult(
             left_lane=parsed.lane_lines.left_lane,
@@ -254,7 +264,7 @@ class LaneDetectionModule(BaseModule):
             vehicle_offset=vehicle_offset,
             lane_mask=lane_mask,
             drivable_mask=drivable_mask,
-            lane_departure=False,
+            lane_departure=lane_departure,
             preprocessed_edges=preprocessed_edges,
             raw_status=parsed.raw_status,
         )

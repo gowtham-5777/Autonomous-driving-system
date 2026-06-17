@@ -14,6 +14,7 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 
 from .lane_geometry import LaneGeometryExtractor
+from .postprocess import resize_mask_to_frame
 from .output_schema import (
     DrivableAreaData,
     LaneCenterData,
@@ -96,10 +97,22 @@ class YOLOPOutputParser:
         logger.info("Parsing YOLOP raw outputs")
 
         resolved_shape = self._resolve_frame_shape(raw_outputs, frame_shape)
-        masks = self.extract_segmentation_masks(raw_outputs)
+        frame_height = int(resolved_shape[0]) if len(resolved_shape) >= 1 else 0
+        frame_width = int(resolved_shape[1]) if len(resolved_shape) >= 2 else 0
+
         lane_lines = self.extract_lane_information(raw_outputs)
         drivable_area = self.extract_drivable_area(raw_outputs)
-        lane_center = self.compute_lane_center(lane_lines, resolved_shape)
+        lane_lines_for_geometry = self._align_lane_lines_to_frame(
+            lane_lines,
+            frame_height,
+            frame_width,
+        )
+
+        masks = {
+            "drivable_mask": drivable_area.mask,
+            "lane_mask": lane_lines.lane_mask,
+        }
+        lane_center = self.compute_lane_center(lane_lines_for_geometry, resolved_shape)
         vehicle_offset = self.compute_vehicle_offset(
             lane_center,
             frame_width=int(resolved_shape[1]) if len(resolved_shape) >= 2 else 0,
@@ -474,6 +487,26 @@ class YOLOPOutputParser:
                 "raw_outputs must be a mapping or sequence, got "
                 f"{type(raw_outputs).__name__}"
             )
+
+    @staticmethod
+    def _align_lane_lines_to_frame(
+        lane_lines: LaneLineData,
+        frame_height: int,
+        frame_width: int,
+    ) -> LaneLineData:
+        """Resize lane mask to frame dimensions when model output differs."""
+        if lane_lines.lane_mask is None or frame_height <= 0 or frame_width <= 0:
+            return lane_lines
+
+        return LaneLineData(
+            left_lane=lane_lines.left_lane,
+            right_lane=lane_lines.right_lane,
+            lane_mask=resize_mask_to_frame(
+                lane_lines.lane_mask,
+                frame_height,
+                frame_width,
+            ),
+        )
 
     @staticmethod
     def _resolve_frame_shape(

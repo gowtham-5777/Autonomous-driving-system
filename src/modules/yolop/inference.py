@@ -16,7 +16,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from src.modules.yolop.vendor import get_net
+from .vendor import get_net
 
 logger = logging.getLogger("adas.modules.yolop.inference")
 

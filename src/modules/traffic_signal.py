@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.modules.base import BaseModule, Frame, PredictionResult
+from .base import BaseModule, Frame, PredictionResult
 
 
 class TrafficSignalModule(BaseModule):

@@ -10,7 +10,7 @@ Provides three layers for future YOLOP integration:
 No YOLOP code or model downloads are performed at this stage.
 """
 
-from src.modules.yolop.inference import (
+from .inference import (
     InferenceConfig,
     InferenceExecutionError,
     InferenceNotReadyError,
@@ -19,7 +19,7 @@ from src.modules.yolop.inference import (
     YOLOPInferenceEngine,
     YOLOPRawOutput,
 )
-from src.modules.yolop.model_loader import (
+from .model_loader import (
     CheckpointLoadError,
     CheckpointMetadata,
     CheckpointNotFoundError,
@@ -27,20 +27,20 @@ from src.modules.yolop.model_loader import (
     DEFAULT_YOLOP_CHECKPOINT,
     YOLOPModelLoader,
 )
-from src.modules.yolop.lane_geometry import (
+from .lane_geometry import (
     LaneGeometryExtractor,
     LanePixels,
     VehicleOffsetResult,
 )
-from src.modules.yolop.postprocess import (
+from .postprocess import (
     ConnectedComponentsResult,
     connect_lane,
     connected_components_analysis,
     morphological_process,
     postprocess_lane_mask,
 )
-from src.modules.yolop.output_parser import ParserConfig, YOLOPOutputParser
-from src.modules.yolop.output_schema import (
+from .output_parser import ParserConfig, YOLOPOutputParser
+from .output_schema import (
     DrivableAreaData,
     LaneCenterData,
     LaneDepartureData,
@@ -50,7 +50,7 @@ from src.modules.yolop.output_schema import (
     VehicleOffsetData,
 )
 
-from src.modules.yolop.utils import (
+from .utils import (
     LaneParseResult,
     compute_vehicle_offset,
     parse_lane_mask,

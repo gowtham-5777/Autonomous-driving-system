@@ -7,25 +7,25 @@ from typing import Any
 
 import numpy as np
 
-from src.modules.base import BaseModule, Frame
-from src.modules.yolop.inference import (
+from .base import BaseModule, Frame
+from .yolop.inference import (
     InferenceExecutionError,
     InferenceNotReadyError,
     InvalidFrameError,
     YOLOPInferenceEngine,
 )
-from src.modules.yolop.lane_geometry import LaneGeometryExtractor
-from src.modules.yolop.model_loader import (
+from .yolop.lane_geometry import LaneGeometryExtractor
+from .yolop.model_loader import (
     CheckpointLoadError,
     CheckpointNotFoundError,
     CheckpointValidationError,
     YOLOPModelLoader,
 )
-from src.modules.yolop.output_parser import YOLOPOutputParser
-from src.modules.yolop.output_schema import LaneDetectionResult
-from src.modules.yolop.postprocess import postprocess_lane_mask
-from src.preprocessing.lane_preprocess import LanePreprocessor
-from src.utils.model_paths import get_yolop_weights_path
+from .yolop.output_parser import YOLOPOutputParser
+from .yolop.output_schema import LaneDetectionResult
+from .yolop.postprocess import postprocess_lane_mask
+from ..preprocessing.lane_preprocess import LanePreprocessor
+from ..utils.model_paths import get_yolop_weights_path
 
 LANE_OUTPUT_KEYS = (
     "left_lane",

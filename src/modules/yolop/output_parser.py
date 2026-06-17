@@ -13,8 +13,8 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
-from src.modules.yolop.lane_geometry import LaneGeometryExtractor
-from src.modules.yolop.output_schema import (
+from .lane_geometry import LaneGeometryExtractor
+from .output_schema import (
     DrivableAreaData,
     LaneCenterData,
     LaneDepartureData,

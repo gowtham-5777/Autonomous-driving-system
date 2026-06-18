@@ -235,6 +235,37 @@ def get_yolop_weights_path() -> Path:
     return _get_weight_path("yolop", "YOLOP")
 
 
+def get_yolov8_weights_path() -> Path:
+    """Return the path to YOLOv8 vehicle detection weights.
+
+    Returns:
+        Path to the YOLOv8 checkpoint file (``yolov8/yolov8s.pt`` by default).
+    """
+    return _get_weight_path("yolov8", "YOLOv8")
+
+
+def get_yolov8_config() -> dict[str, Any]:
+    """Return YOLOv8 settings merged with global object-detection thresholds.
+
+    Returns:
+        Dictionary with ``model_variant``, ``imgsz``, ``device``,
+        ``max_detections``, ``confidence_threshold``, and ``iou_threshold``.
+    """
+    config = _load_config()
+    yolov8 = dict(config.get("yolov8", {}))
+    thresholds = config.get("thresholds", {})
+
+    yolov8.setdefault("model_variant", "s")
+    yolov8.setdefault("imgsz", 640)
+    yolov8.setdefault("device", "cpu")
+    yolov8.setdefault("max_detections", 100)
+    yolov8["confidence_threshold"] = float(
+        thresholds.get("object_confidence", 0.5)
+    )
+    yolov8["iou_threshold"] = float(thresholds.get("object_iou", 0.45))
+    return yolov8
+
+
 def get_ssd_weights_path() -> Path:
     """Return the path to SSD MobileNetV2 object detection weights.
 

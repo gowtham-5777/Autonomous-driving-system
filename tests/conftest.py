@@ -196,3 +196,80 @@ def lane_detection_module(yolop_weights_path: Path, stub_inference_engine):
     )
     module.initialize()
     return module
+
+
+@pytest.fixture
+def stub_yolov8_inference_engine():
+    """Inference engine that returns synthetic detections without Ultralytics."""
+    from src.modules.yolov8.inference import YOLOv8InferenceConfig, YOLOv8InferenceEngine
+
+    class _StubYOLOv8InferenceEngine(YOLOv8InferenceEngine):
+        """Stub forward pass with fake boxes for pipeline tests."""
+
+        def attach_model(self, model_package: dict) -> None:
+            self.model_package = model_package
+            self._model = model_package.get("model") or object()
+
+        def run(self, frame: np.ndarray) -> dict:
+            if not self.is_ready:
+                return self.empty_output(original_shape=frame.shape)
+
+            self._validate_frame(frame)
+            height, width = frame.shape[:2]
+            cx = width // 2
+            cy = height - 80
+
+            boxes = np.array(
+                [[cx - 70, cy - 50, cx + 70, cy + 30]],
+                dtype=np.float32,
+            )
+            confidences = np.array([0.91], dtype=np.float32)
+            class_ids = np.array([2], dtype=np.int32)  # car
+
+            return {
+                "boxes_xyxy": boxes,
+                "confidences": confidences,
+                "class_ids": class_ids,
+                "inference_status": "stub",
+                "original_shape": frame.shape,
+                "inference_time_ms": 2.5,
+                "imgsz": self.config.imgsz,
+            }
+
+    return _StubYOLOv8InferenceEngine(config=YOLOv8InferenceConfig(device="cpu"))
+
+
+@pytest.fixture
+def stub_yolov8_model_loader():
+    """Model loader that skips Ultralytics for unit/integration tests."""
+    from src.modules.yolov8.model_loader import WeightsMetadata, YOLOv8ModelLoader
+
+    class _StubYOLOv8ModelLoader(YOLOv8ModelLoader):
+        def load_model(self) -> WeightsMetadata:
+            self._resolved_source = "stub://yolov8s.pt"
+            self._model = object()
+            self._metadata = WeightsMetadata(
+                weights_path=self._resolved_source,
+                model_variant=self.model_variant,
+                file_size_bytes=None,
+                device=self.device,
+                loaded_at="stub",
+                ultralytics_version="stub",
+            )
+            return self._metadata
+
+    return _StubYOLOv8ModelLoader(device="cpu", model_variant="s")
+
+
+@pytest.fixture
+def vehicle_detection_module(stub_yolov8_model_loader, stub_yolov8_inference_engine):
+    """Initialized :class:`VehicleDetectionModule` ready for inference."""
+    from src.modules.vehicle_detection import VehicleDetectionModule
+
+    module = VehicleDetectionModule(
+        model_loader=stub_yolov8_model_loader,
+        inference_engine=stub_yolov8_inference_engine,
+        device="cpu",
+    )
+    module.initialize()
+    return module

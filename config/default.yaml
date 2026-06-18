@@ -25,6 +25,7 @@ paths:
 # Weight filenames resolved relative to pretrained or trained directories
 weight_files:
   yolop: "yolop/End-to-end.pth"
+  yolov8: "yolov8/yolov8s.pt"
   ssd_mobilenetv2: "ssd_mobilenet_v2_coco.pb"
   yolov5: "yolov5_traffic_signs.pt"
   unet: "unet_cityscapes.pt"
@@ -33,6 +34,7 @@ weight_files:
 # Which directory each weight file lives in: "pretrained" or "trained"
 weight_locations:
   yolop: "pretrained"
+  yolov8: "pretrained"
   ssd_mobilenetv2: "pretrained"
   yolov5: "trained"
   unet: "pretrained"
@@ -41,7 +43,7 @@ weight_locations:
 # Reference-aligned model selections (one per perception module)
 models:
   lane_detection: "YOLOP"
-  object_detection: "SSD_MobileNetV2"
+  object_detection: "YOLOv8"
   traffic_sign: "YOLOv5"
   traffic_signal: "CNN"
   segmentation: "UNet"
@@ -49,8 +51,16 @@ models:
 # Minimum confidence scores for detections to be considered valid
 thresholds:
   object_confidence: 0.5
+  object_iou: 0.45
   sign_confidence: 0.5
   traffic_light_confidence: 0.5
+
+# YOLOv8 vehicle detection settings
+yolov8:
+  model_variant: "s"
+  imgsz: 640
+  device: "cpu"
+  max_detections: 100
 
 # Web application output options
 output:

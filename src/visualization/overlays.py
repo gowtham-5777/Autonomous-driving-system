@@ -259,6 +259,92 @@ def draw_lane_departure_warning(frame: Frame, lane_departure: bool) -> Frame:
     return output
 
 
+# BGR colors for vehicle detection overlays
+VEHICLE_COLORS: dict[str, tuple[int, int, int]] = {
+    "person": (0, 165, 255),
+    "bicycle": (255, 255, 0),
+    "car": (0, 255, 0),
+    "motorcycle": (255, 0, 255),
+    "bus": (0, 128, 255),
+    "truck": (255, 128, 0),
+}
+COLOR_NEAREST_HIGHLIGHT = (0, 255, 255)
+
+
+def draw_vehicle_detections(frame: Frame, results: dict[str, Any]) -> Frame:
+    """Draw bounding boxes and class labels for vehicle detections.
+
+    Expected ``results`` keys:
+        - ``detections``: list of dicts with ``label``, ``confidence``, ``bbox``
+        - ``count_by_label`` (optional)
+        - ``nearest_object`` (optional)
+
+    Args:
+        frame: BGR input image.
+        results: Vehicle prediction dictionary from ``VehicleDetectionModule``.
+
+    Returns:
+        Annotated copy of ``frame``.
+    """
+    output = _ensure_bgr_frame(frame)
+    detections = results.get("detections", [])
+    nearest_bbox = None
+    nearest = results.get("nearest_object")
+    if isinstance(nearest, dict):
+        nearest_bbox = nearest.get("bbox")
+
+    for det in detections:
+        if not isinstance(det, dict):
+            continue
+
+        label = str(det.get("label", "unknown"))
+        confidence = float(det.get("confidence", 0.0))
+        bbox = det.get("bbox")
+        if not bbox or len(bbox) < 4:
+            continue
+
+        x1, y1, x2, y2 = (int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3]))
+        color = VEHICLE_COLORS.get(label, COLOR_PLACEHOLDER)
+        thickness = 4 if bbox == nearest_bbox else 2
+
+        cv2.rectangle(output, (x1, y1), (x2, y2), color, thickness, lineType=cv2.LINE_AA)
+
+        text = f"{label} {confidence:.2f}"
+        text_y = y1 - 8 if y1 > 20 else y2 + 20
+        cv2.putText(
+            output,
+            text,
+            (x1, text_y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            color,
+            2,
+            lineType=cv2.LINE_AA,
+        )
+
+    count_by_label = results.get("count_by_label", {})
+    total = results.get("total_count", len(detections))
+    if count_by_label:
+        summary = ", ".join(f"{k}={v}" for k, v in sorted(count_by_label.items()))
+        hud = f"Objects: {total} ({summary})"
+    else:
+        hud = f"Objects: {total}"
+
+    cv2.putText(
+        output,
+        hud,
+        (output.shape[1] - 420, 30),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.6,
+        COLOR_NEAREST_HIGHLIGHT,
+        2,
+        lineType=cv2.LINE_AA,
+    )
+
+    logger.debug("Vehicle detections drawn — count=%d", total)
+    return output
+
+
 def draw_lane_results(frame: Frame, results: LaneResults) -> Frame:
     """Draw all lane visualization overlays from a prediction dictionary.
 

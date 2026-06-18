@@ -275,13 +275,82 @@ def get_ssd_weights_path() -> Path:
     return _get_weight_path("ssd_mobilenetv2", "SSD MobileNetV2")
 
 
+def get_traffic_sign_weights_path() -> Path:
+    """Return the path to YOLOv8 fine-tuned traffic sign weights.
+
+    Returns:
+        Path to the traffic sign checkpoint file.
+    """
+    return _get_weight_path("yolov8_sign", "YOLOv8 Sign")
+
+
+def get_yolov8_sign_config() -> dict[str, Any]:
+    """Return YOLOv8 sign settings merged with global sign thresholds.
+
+    Returns:
+        Dictionary with ``model_variant``, ``imgsz``, ``device``,
+        ``max_detections``, ``num_classes``, ``confidence_threshold``,
+        and ``iou_threshold``.
+    """
+    config = _load_config()
+    yolov8_sign = dict(config.get("yolov8_sign", {}))
+    thresholds = config.get("thresholds", {})
+
+    yolov8_sign.setdefault("model_variant", "n")
+    yolov8_sign.setdefault("imgsz", 640)
+    yolov8_sign.setdefault("device", "cpu")
+    yolov8_sign.setdefault("max_detections", 50)
+    yolov8_sign.setdefault("num_classes", 7)
+    yolov8_sign["confidence_threshold"] = float(
+        thresholds.get("sign_confidence", 0.5)
+    )
+    yolov8_sign["iou_threshold"] = float(thresholds.get("sign_iou", 0.45))
+    return yolov8_sign
+
+
 def get_yolov5_weights_path() -> Path:
-    """Return the path to YOLOv5 traffic sign recognition weights.
+    """Return the path to YOLOv5 traffic sign recognition weights (legacy).
 
     Returns:
         Path to the YOLOv5 checkpoint file.
     """
     return _get_weight_path("yolov5", "YOLOv5")
+
+
+def get_traffic_signal_weights_path() -> Path:
+    """Return the path to YOLOv8 fine-tuned traffic signal weights.
+
+    Returns:
+        Path to the traffic signal checkpoint file.
+    """
+    return _get_weight_path("yolov8_signal", "YOLOv8 Signal")
+
+
+def get_yolov8_signal_config() -> dict[str, Any]:
+    """Return YOLOv8 signal settings merged with global signal thresholds.
+
+    Returns:
+        Dictionary with ``model_variant``, ``imgsz``, ``device``,
+        ``max_detections``, ``num_classes``, ``confidence_threshold``,
+        and ``iou_threshold``.
+    """
+    config = _load_config()
+    yolov8_signal = dict(config.get("yolov8_signal", {}))
+    thresholds = config.get("thresholds", {})
+
+    yolov8_signal.setdefault("model_variant", "n")
+    yolov8_signal.setdefault("imgsz", 640)
+    yolov8_signal.setdefault("device", "cpu")
+    yolov8_signal.setdefault("max_detections", 20)
+    yolov8_signal.setdefault("num_classes", 3)
+    yolov8_signal["confidence_threshold"] = float(
+        thresholds.get(
+            "signal_confidence",
+            thresholds.get("traffic_light_confidence", 0.5),
+        )
+    )
+    yolov8_signal["iou_threshold"] = float(thresholds.get("signal_iou", 0.45))
+    return yolov8_signal
 
 
 def get_unet_weights_path() -> Path:
@@ -293,8 +362,38 @@ def get_unet_weights_path() -> Path:
     return _get_weight_path("unet", "U-Net")
 
 
+def get_decision_config() -> dict[str, Any]:
+    """Return decision engine threshold settings from configuration."""
+    config = _load_config()
+    decision = dict(config.get("decision", {}))
+    decision.setdefault("red_light_confidence", 0.70)
+    decision.setdefault("stop_sign_confidence", 0.70)
+    decision.setdefault("stop_sign_lower_frame_fraction", 0.40)
+    decision.setdefault("vulnerable_user_confidence", 0.60)
+    decision.setdefault("large_vehicle_area_ratio", 0.08)
+    decision.setdefault("lane_offset_warn_px", 35.0)
+    decision.setdefault("drivable_overlap_threshold", 0.15)
+    return decision
+
+
+def get_pipeline_config() -> dict[str, Any]:
+    """Return pipeline orchestrator settings from configuration."""
+    config = _load_config()
+    pipeline = dict(config.get("pipeline", {}))
+    pipeline.setdefault("run_lane", True)
+    pipeline.setdefault("run_vehicles", True)
+    pipeline.setdefault("run_signs", True)
+    pipeline.setdefault("run_signals", True)
+    pipeline.setdefault("run_segmentation", False)
+    pipeline.setdefault("auto_initialize", True)
+    pipeline.setdefault("collect_timing", True)
+    return pipeline
+
+
 def get_traffic_light_cnn_path() -> Path:
-    """Return the path to the traffic light CNN classifier weights.
+    """Return the path to the traffic light CNN classifier weights (legacy).
+
+    Deprecated: use :func:`get_traffic_signal_weights_path` for YOLOv8 signal weights.
 
     Returns:
         Path to the traffic light CNN checkpoint file.

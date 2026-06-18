@@ -1,0 +1,53 @@
+{
+  "splits": {
+    "train": {
+      "source_label_files": 70000,
+      "images_exported": 36765,
+      "boxes_kept": 129012,
+      "class_counts": {
+        "green": 79441,
+        "yellow": 3418,
+        "red": 46153
+      },
+      "skipped": {
+        "none_color": 57225,
+        "invalid_color": 0,
+        "invalid_box": 64
+      },
+      "missing_images": 0,
+      "images_without_valid_labels": 33235
+    },
+    "val": {
+      "source_label_files": 10000,
+      "images_exported": 5283,
+      "boxes_kept": 18538,
+      "class_counts": {
+        "green": 11423,
+        "yellow": 510,
+        "red": 6605
+      },
+      "skipped": {
+        "none_color": 8349,
+        "invalid_color": 0,
+        "invalid_box": 4
+      },
+      "missing_images": 0,
+      "images_without_valid_labels": 4717
+    }
+  },
+  "class_counts": {
+    "green": 90864,
+    "yellow": 3928,
+    "red": 52758
+  },
+  "skipped": {
+    "none_color": 65574,
+    "invalid_color": 0,
+    "invalid_box": 68
+  },
+  "total_traffic_lights_seen": 213192,
+  "total_boxes_kept": 147550,
+  "images_with_labels": 42048,
+  "images_without_valid_labels": 37952,
+  "missing_images": 0
+}

@@ -151,6 +151,9 @@ def draw_lane_center(frame: Frame, lane_center: LaneCenter) -> Frame:
     if lane_center is None:
         center_x = width // 2
         logger.debug("Drawing placeholder lane center at x=%d", center_x)
+    elif isinstance(lane_center, (int, float)):
+        center_x = int(lane_center)
+        logger.debug("Drawing lane center at x=%d (scalar)", center_x)
     else:
         center_x = int(lane_center[0])
         logger.debug("Drawing lane center at x=%d", center_x)
@@ -342,6 +345,259 @@ def draw_vehicle_detections(frame: Frame, results: dict[str, Any]) -> Frame:
     )
 
     logger.debug("Vehicle detections drawn — count=%d", total)
+    return output
+
+
+# BGR colors for traffic sign overlays
+SIGN_COLORS: dict[str, tuple[int, int, int]] = {
+    "stop": (0, 0, 220),
+    "speed_limit_30": (220, 120, 0),
+    "speed_limit_60": (220, 120, 0),
+    "turn_left": (0, 220, 220),
+    "turn_right": (0, 220, 220),
+    "keep_right": (0, 220, 220),
+    "pedestrian_crossing": (0, 165, 255),
+}
+COLOR_SIGN_NEAREST = (0, 255, 255)
+
+
+def _sign_color(label: str) -> tuple[int, int, int]:
+    """Return overlay color for a sign label, including speed_limit_* variants."""
+    if label in SIGN_COLORS:
+        return SIGN_COLORS[label]
+    if label.startswith("speed_limit_"):
+        return SIGN_COLORS["speed_limit_30"]
+    return COLOR_PLACEHOLDER
+
+
+def draw_traffic_signs(frame: Frame, results: dict[str, Any]) -> Frame:
+    """Draw bounding boxes and labels for traffic sign detections.
+
+    Expected ``results`` keys:
+        - ``detections``: list of dicts with ``sign_label``, ``confidence``, ``bbox``
+        - ``count_by_label`` (optional)
+        - ``nearest_sign`` (optional)
+        - ``active_speed_limit_kmh`` (optional)
+
+    Args:
+        frame: BGR input image.
+        results: Traffic sign prediction dictionary from ``TrafficSignModule``.
+
+    Returns:
+        Annotated copy of ``frame``.
+    """
+    output = _ensure_bgr_frame(frame)
+    detections = results.get("detections", [])
+    nearest_bbox = None
+    nearest = results.get("nearest_sign")
+    if isinstance(nearest, dict):
+        nearest_bbox = nearest.get("bbox")
+
+    for det in detections:
+        if not isinstance(det, dict):
+            continue
+
+        label = str(det.get("sign_label", "unknown"))
+        confidence = float(det.get("confidence", 0.0))
+        bbox = det.get("bbox")
+        if not bbox or len(bbox) < 4:
+            continue
+
+        x1, y1, x2, y2 = (int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3]))
+        color = _sign_color(label)
+        thickness = 4 if bbox == nearest_bbox else 2
+
+        cv2.rectangle(output, (x1, y1), (x2, y2), color, thickness, lineType=cv2.LINE_AA)
+
+        text = f"{label} {confidence:.2f}"
+        text_y = y1 - 8 if y1 > 20 else y2 + 20
+        cv2.putText(
+            output,
+            text,
+            (x1, text_y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            color,
+            2,
+            lineType=cv2.LINE_AA,
+        )
+
+        speed_limit = det.get("speed_limit_kmh")
+        if speed_limit is not None:
+            speed_text = f"{speed_limit} km/h"
+            cv2.putText(
+                output,
+                speed_text,
+                (x1, text_y - 22 if text_y > 42 else text_y + 42),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                color,
+                2,
+                lineType=cv2.LINE_AA,
+            )
+
+    count_by_label = results.get("count_by_label", {})
+    total = results.get("total_count", len(detections))
+    if count_by_label:
+        summary = ", ".join(f"{k}={v}" for k, v in sorted(count_by_label.items()))
+        hud = f"Signs: {total} ({summary})"
+    else:
+        hud = f"Signs: {total}"
+
+    active_limit = results.get("active_speed_limit_kmh")
+    if active_limit is not None:
+        hud = f"{hud} | limit={active_limit} km/h"
+
+    cv2.putText(
+        output,
+        hud,
+        (20, 30),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.6,
+        COLOR_SIGN_NEAREST,
+        2,
+        lineType=cv2.LINE_AA,
+    )
+
+    logger.debug("Traffic sign detections drawn — count=%d", total)
+    return output
+
+
+# BGR colors for traffic signal overlays
+SIGNAL_COLORS: dict[str, tuple[int, int, int]] = {
+    "red_light": (0, 0, 255),
+    "yellow_light": (0, 255, 255),
+    "green_light": (0, 255, 0),
+}
+COLOR_SIGNAL_CONTROLLING = (255, 255, 0)
+_DOMINANT_STATE_BANNER: dict[str, tuple[str, tuple[int, int, int]]] = {
+    "red_light": ("SIGNAL: RED", SIGNAL_COLORS["red_light"]),
+    "yellow_light": ("SIGNAL: YELLOW", SIGNAL_COLORS["yellow_light"]),
+    "green_light": ("SIGNAL: GREEN", SIGNAL_COLORS["green_light"]),
+}
+
+
+def draw_traffic_signals(frame: Frame, results: dict[str, Any]) -> Frame:
+    """Draw bounding boxes and labels for traffic signal detections.
+
+    Expected ``results`` keys:
+        - ``detections``: list of dicts with ``signal_label``, ``confidence``, ``bbox``
+        - ``count_by_label`` (optional)
+        - ``controlling_signal`` (optional)
+        - ``dominant_state`` (optional)
+
+    Args:
+        frame: BGR input image.
+        results: Traffic signal prediction dictionary from ``TrafficSignalModule``.
+
+    Returns:
+        Annotated copy of ``frame``.
+    """
+    output = _ensure_bgr_frame(frame)
+    detections = results.get("detections", [])
+    controlling_bbox = None
+    controlling = results.get("controlling_signal")
+    if isinstance(controlling, dict):
+        controlling_bbox = controlling.get("bbox")
+
+    for det in detections:
+        if not isinstance(det, dict):
+            continue
+
+        label = str(det.get("signal_label", "unknown"))
+        confidence = float(det.get("confidence", 0.0))
+        bbox = det.get("bbox")
+        if not bbox or len(bbox) < 4:
+            continue
+
+        x1, y1, x2, y2 = (int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3]))
+        color = SIGNAL_COLORS.get(label, COLOR_PLACEHOLDER)
+        thickness = 4 if bbox == controlling_bbox else 2
+
+        cv2.rectangle(output, (x1, y1), (x2, y2), color, thickness, lineType=cv2.LINE_AA)
+
+        text = f"{label} {confidence:.2f}"
+        text_y = y1 - 8 if y1 > 20 else y2 + 20
+        cv2.putText(
+            output,
+            text,
+            (x1, text_y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            color,
+            2,
+            lineType=cv2.LINE_AA,
+        )
+
+    dominant_state = results.get("dominant_state")
+    if dominant_state and dominant_state in _DOMINANT_STATE_BANNER:
+        banner_text, banner_color = _DOMINANT_STATE_BANNER[dominant_state]
+        banner_width = output.shape[1]
+        text_size = cv2.getTextSize(
+            banner_text, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2
+        )[0]
+        text_x = max(10, (banner_width - text_size[0]) // 2)
+        cv2.putText(
+            output,
+            banner_text,
+            (text_x, 55),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.8,
+            banner_color,
+            2,
+            lineType=cv2.LINE_AA,
+        )
+
+    count_by_label = results.get("count_by_label", {})
+    total = results.get("total_count", len(detections))
+    if count_by_label:
+        summary = ", ".join(f"{k}={v}" for k, v in sorted(count_by_label.items()))
+        hud = f"Lights: {total} ({summary})"
+    else:
+        hud = f"Lights: {total}"
+
+    cv2.putText(
+        output,
+        hud,
+        (output.shape[1] - 420, 30),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.6,
+        COLOR_SIGNAL_CONTROLLING,
+        2,
+        lineType=cv2.LINE_AA,
+    )
+
+    logger.debug("Traffic signal detections drawn — count=%d", total)
+    return output
+
+
+def draw_scene_overlays(
+    frame: Frame,
+    scene: Any,
+    *,
+    show_lane: bool = True,
+    show_vehicles: bool = True,
+    show_signs: bool = True,
+    show_signals: bool = True,
+) -> Frame:
+    """Apply all enabled module overlays in standard z-order.
+
+    Layer order: lane → vehicles → signs → signals.
+    """
+    output = _ensure_bgr_frame(frame)
+
+    if show_lane and scene.lane is not None:
+        output = draw_lane_results(output, scene.lane.to_prediction_dict())
+
+    if show_vehicles and scene.vehicles is not None:
+        output = draw_vehicle_detections(output, scene.vehicles.to_prediction_dict())
+
+    if show_signs and scene.signs is not None:
+        output = draw_traffic_signs(output, scene.signs.to_prediction_dict())
+
+    if show_signals and scene.signals is not None:
+        output = draw_traffic_signals(output, scene.signals.to_prediction_dict())
+
     return output
 
 

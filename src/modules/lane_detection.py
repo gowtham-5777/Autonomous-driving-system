@@ -186,8 +186,15 @@ class LaneDetectionModule(BaseModule):
             raise
 
     def visualize(self, frame: Frame, results: LaneDetectionResult | dict[str, Any]) -> Frame:
-        """Return a copy of the frame (visualization not implemented)."""
-        return frame.copy()
+        """Draw lane overlays on the frame."""
+        from ..visualization.overlays import draw_lane_results
+
+        if isinstance(results, LaneDetectionResult):
+            payload = results.to_prediction_dict()
+        else:
+            payload = results
+
+        return draw_lane_results(frame, payload)
 
     def cleanup(self) -> None:
         """Release model resources and reset module state."""

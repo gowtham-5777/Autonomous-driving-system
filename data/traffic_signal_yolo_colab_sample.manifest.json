@@ -1,0 +1,32 @@
+{
+  "output_zip": "c:\\Users\\gauth\\Desktop\\Autonomous Driving Car\\data\\traffic_signal_yolo_colab_sample.zip",
+  "zip_size_mb": 324.31,
+  "train_images": 5000,
+  "val_images": 1000,
+  "sample_stats": {
+    "splits": {
+      "train": {
+        "images_exported": 5000,
+        "class_counts": {
+          "red": 6291,
+          "green": 10827,
+          "yellow": 459
+        }
+      },
+      "val": {
+        "images_exported": 1000,
+        "class_counts": {
+          "red": 1307,
+          "green": 2247,
+          "yellow": 91
+        }
+      }
+    },
+    "class_counts": {
+      "red": 7598,
+      "green": 13074,
+      "yellow": 550
+    },
+    "images_with_labels": 6000
+  }
+}

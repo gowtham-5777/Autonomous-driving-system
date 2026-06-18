@@ -13,8 +13,10 @@ from .vehicle_detection import (
 from .yolop.output_schema import LaneDetectionResult
 from .yolov8.output_schema import VehicleDetectionResult
 from .segmentation import SegmentationModule
-from .traffic_sign import TrafficSignModule
-from .traffic_signal import TrafficSignalModule
+from .traffic_sign import TRAFFIC_SIGN_OUTPUT_KEYS, TrafficSignModule
+from .traffic_signal import TRAFFIC_SIGNAL_OUTPUT_KEYS, TrafficSignalModule
+from .yolov8_sign.output_schema import TrafficSignDetectionResult
+from .yolov8_signal.output_schema import TrafficSignalDetectionResult
 
 __all__ = [
     "BaseModule",
@@ -28,6 +30,10 @@ __all__ = [
     "VehicleDetectionResult",
     "VEHICLE_OUTPUT_KEYS",
     "TrafficSignModule",
+    "TrafficSignDetectionResult",
+    "TRAFFIC_SIGN_OUTPUT_KEYS",
     "TrafficSignalModule",
+    "TrafficSignalDetectionResult",
+    "TRAFFIC_SIGNAL_OUTPUT_KEYS",
     "SegmentationModule",
 ]

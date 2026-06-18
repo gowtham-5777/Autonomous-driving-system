@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Generated outputs
+outputs/
+
+# Local dataset images (hard-linked to external BDD100K; regenerate via prepare script)
+data/traffic_signal_yolo/images/
+
+# Large Colab export archives (upload to Drive separately)
+data/*.zip

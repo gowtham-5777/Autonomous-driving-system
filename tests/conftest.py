@@ -273,3 +273,188 @@ def vehicle_detection_module(stub_yolov8_model_loader, stub_yolov8_inference_eng
     )
     module.initialize()
     return module
+
+
+@pytest.fixture
+def stub_yolov8_sign_inference_engine():
+    """Inference engine that returns synthetic sign detections without Ultralytics."""
+    from src.modules.yolov8_sign.inference import (
+        YOLOv8SignInferenceConfig,
+        YOLOv8SignInferenceEngine,
+    )
+
+    class _StubYOLOv8SignInferenceEngine(YOLOv8SignInferenceEngine):
+        """Stub forward pass with a fake stop sign at upper-center."""
+
+        def attach_model(self, model_package: dict) -> None:
+            self.model_package = model_package
+            self._model = model_package.get("model") or object()
+
+        def run(self, frame: np.ndarray) -> dict:
+            if not self.is_ready:
+                return self.empty_output(original_shape=frame.shape)
+
+            self._validate_frame(frame)
+            height, width = frame.shape[:2]
+            cx = width // 2
+            cy = height // 4
+
+            boxes = np.array(
+                [[cx - 40, cy - 40, cx + 40, cy + 40]],
+                dtype=np.float32,
+            )
+            confidences = np.array([0.92], dtype=np.float32)
+            class_ids = np.array([0], dtype=np.int32)  # stop
+
+            return {
+                "boxes_xyxy": boxes,
+                "confidences": confidences,
+                "class_ids": class_ids,
+                "inference_status": "stub",
+                "original_shape": frame.shape,
+                "inference_time_ms": 2.0,
+                "imgsz": self.config.imgsz,
+            }
+
+    return _StubYOLOv8SignInferenceEngine(config=YOLOv8SignInferenceConfig(device="cpu"))
+
+
+@pytest.fixture
+def stub_yolov8_sign_model_loader():
+    """Model loader that skips Ultralytics for traffic sign tests."""
+    from src.modules.yolov8_sign.model_loader import (
+        WeightsMetadata,
+        YOLOv8SignModelLoader,
+    )
+
+    class _StubYOLOv8SignModelLoader(YOLOv8SignModelLoader):
+        def load_model(self) -> WeightsMetadata:
+            self._resolved_source = "stub://traffic_signs_yolov8n.pt"
+            self._model = object()
+            self._metadata = WeightsMetadata(
+                weights_path=self._resolved_source,
+                model_variant=self.model_variant,
+                file_size_bytes=None,
+                device=self.device,
+                loaded_at="stub",
+                ultralytics_version="stub",
+            )
+            return self._metadata
+
+    return _StubYOLOv8SignModelLoader(device="cpu", model_variant="n")
+
+
+@pytest.fixture
+def traffic_sign_module(stub_yolov8_sign_model_loader, stub_yolov8_sign_inference_engine):
+    """Initialized :class:`TrafficSignModule` ready for inference."""
+    from src.modules.traffic_sign import TrafficSignModule
+
+    module = TrafficSignModule(
+        model_loader=stub_yolov8_sign_model_loader,
+        inference_engine=stub_yolov8_sign_inference_engine,
+        device="cpu",
+    )
+    module.initialize()
+    return module
+
+
+@pytest.fixture
+def stub_yolov8_signal_inference_engine():
+    """Inference engine that returns synthetic signal detections without Ultralytics."""
+    from src.modules.yolov8_signal.inference import (
+        YOLOv8SignalInferenceConfig,
+        YOLOv8SignalInferenceEngine,
+    )
+
+    class _StubYOLOv8SignalInferenceEngine(YOLOv8SignalInferenceEngine):
+        """Stub forward pass with a fake red light at upper-center."""
+
+        def attach_model(self, model_package: dict) -> None:
+            self.model_package = model_package
+            self._model = model_package.get("model") or object()
+
+        def run(self, frame: np.ndarray) -> dict:
+            if not self.is_ready:
+                return self.empty_output(original_shape=frame.shape)
+
+            self._validate_frame(frame)
+            height, width = frame.shape[:2]
+            cx = width // 2
+            cy = height // 5
+
+            boxes = np.array(
+                [[cx - 25, cy - 35, cx + 25, cy + 35]],
+                dtype=np.float32,
+            )
+            confidences = np.array([0.90], dtype=np.float32)
+            class_ids = np.array([0], dtype=np.int32)  # red_light
+
+            return {
+                "boxes_xyxy": boxes,
+                "confidences": confidences,
+                "class_ids": class_ids,
+                "inference_status": "stub",
+                "original_shape": frame.shape,
+                "inference_time_ms": 2.0,
+                "imgsz": self.config.imgsz,
+            }
+
+    return _StubYOLOv8SignalInferenceEngine(config=YOLOv8SignalInferenceConfig(device="cpu"))
+
+
+@pytest.fixture
+def stub_yolov8_signal_model_loader():
+    """Model loader that skips Ultralytics for traffic signal tests."""
+    from src.modules.yolov8_signal.model_loader import (
+        WeightsMetadata,
+        YOLOv8SignalModelLoader,
+    )
+
+    class _StubYOLOv8SignalModelLoader(YOLOv8SignalModelLoader):
+        def load_model(self) -> WeightsMetadata:
+            self._resolved_source = "stub://traffic_signals_yolov8n.pt"
+            self._model = object()
+            self._metadata = WeightsMetadata(
+                weights_path=self._resolved_source,
+                model_variant=self.model_variant,
+                file_size_bytes=None,
+                device=self.device,
+                loaded_at="stub",
+                ultralytics_version="stub",
+            )
+            return self._metadata
+
+    return _StubYOLOv8SignalModelLoader(device="cpu", model_variant="n")
+
+
+@pytest.fixture
+def traffic_signal_module(stub_yolov8_signal_model_loader, stub_yolov8_signal_inference_engine):
+    """Initialized :class:`TrafficSignalModule` ready for inference."""
+    from src.modules.traffic_signal import TrafficSignalModule
+
+    module = TrafficSignalModule(
+        model_loader=stub_yolov8_signal_model_loader,
+        inference_engine=stub_yolov8_signal_inference_engine,
+        device="cpu",
+    )
+    module.initialize()
+    return module
+
+
+@pytest.fixture
+def pipeline_orchestrator(
+    lane_detection_module,
+    vehicle_detection_module,
+    traffic_sign_module,
+    traffic_signal_module,
+):
+    """Pipeline orchestrator wired to stub perception module fixtures."""
+    from src.pipeline.orchestrator import PipelineConfig, PipelineOrchestrator
+
+    return PipelineOrchestrator(
+        lane_module=lane_detection_module,
+        vehicle_module=vehicle_detection_module,
+        sign_module=traffic_sign_module,
+        signal_module=traffic_signal_module,
+        config=PipelineConfig(auto_initialize=False, collect_timing=True),
+    )

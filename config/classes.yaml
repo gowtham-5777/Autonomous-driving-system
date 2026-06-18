@@ -5,7 +5,7 @@
 # Full GTSRB-to-label mappings will be added during YOLOv5 training setup.
 # =============================================================================
 
-# Traffic sign categories recognized by the Traffic Sign Recognition module (YOLOv5)
+# Traffic sign categories recognized by the Traffic Sign Recognition module (YOLOv8)
 traffic_sign_classes:
   - stop
   - speed_limit_30
@@ -15,7 +15,13 @@ traffic_sign_classes:
   - keep_right
   - pedestrian_crossing
 
-# Traffic signal states classified by the Traffic Signal Detection module (CNN)
+# Traffic signal states detected by the Traffic Signal Detection module (YOLOv8)
+traffic_signal_classes:
+  - red_light
+  - yellow_light
+  - green_light
+
+# Legacy CNN classifier labels (deprecated — use traffic_signal_classes)
 traffic_light_classes:
   - red
   - yellow

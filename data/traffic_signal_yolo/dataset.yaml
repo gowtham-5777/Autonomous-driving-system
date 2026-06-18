@@ -1,0 +1,8 @@
+path: C:/Users/gauth/Desktop/Autonomous Driving Car/data/traffic_signal_yolo
+train: images/train
+val: images/val
+nc: 3
+names:
+  0: red
+  1: yellow
+  2: green

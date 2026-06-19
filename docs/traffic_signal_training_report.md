@@ -3,7 +3,7 @@
 **Repository:** Autonomous Driving Car  
 **Date:** June 2026  
 **Model:** YOLOv8n fine-tuned on BDD100K traffic-light annotations  
-**Status:** Training pipeline ready — class labels **aligned with ADAS runtime** (red=0, yellow=1, green=2)
+**Status:** Training pipeline complete — weights produced and validated on BDD100K val split.
 
 ---
 
@@ -181,6 +181,17 @@ python scripts/evaluate_traffic_signal.py \
 | **mAP@0.5:0.95** | COCO-style AP (IoU 0.50–0.95) |
 
 Per-class AP@0.5 is reported under both YOLO names (`red`, `yellow`, `green`) and ADAS names (`red_light`, `yellow_light`, `green_light`).
+
+### 6.3 Validation results (BDD100K val split)
+
+| Metric | Value |
+|--------|-------|
+| **Precision** | 0.580 |
+| **Recall** | 0.443 |
+| **mAP@0.5** | 0.443 |
+| **mAP@0.5:0.95** | 0.149 |
+
+Weights: `models/trained/yolov8_signal/traffic_signals_yolov8n.pt`
 
 ---
 

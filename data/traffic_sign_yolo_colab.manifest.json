@@ -1,0 +1,22 @@
+{
+  "dataset_dir": "C:\\Users\\gauth\\Desktop\\Autonomous Driving Car\\data\\traffic_sign_yolo",
+  "output_zip": "C:\\Users\\gauth\\Desktop\\Autonomous Driving Car\\data\\traffic_sign_yolo_colab.zip",
+  "colab_dataset_path": "/content/traffic_sign_yolo",
+  "class_names": [
+    "stop",
+    "speed_limit_30",
+    "speed_limit_60",
+    "turn_left",
+    "turn_right",
+    "keep_right",
+    "pedestrian_crossing"
+  ],
+  "file_counts": {
+    "images_train": 9840,
+    "labels_train": 9840,
+    "images_val": 0,
+    "labels_val": 0
+  },
+  "total_files_in_zip": 19682,
+  "zip_size_mb": 24.45
+}

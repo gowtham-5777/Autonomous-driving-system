@@ -1,0 +1,79 @@
+{
+  "splits": {
+    "train": {
+      "images_exported": 9840,
+      "boxes_kept": 9840,
+      "class_counts": {
+        "stop": 780,
+        "speed_limit_30": 2220,
+        "speed_limit_60": 1860,
+        "turn_left": 2070,
+        "turn_right": 420,
+        "keep_right": 390,
+        "pedestrian_crossing": 2100
+      },
+      "gtsrb_class_counts": {
+        "1": 2220,
+        "5": 1860,
+        "12": 2100,
+        "14": 780,
+        "34": 420,
+        "36": 390,
+        "38": 2070
+      }
+    },
+    "val": {
+      "images_exported": 0,
+      "boxes_kept": 0,
+      "class_counts": {
+        "stop": 0,
+        "speed_limit_30": 0,
+        "speed_limit_60": 0,
+        "turn_left": 0,
+        "turn_right": 0,
+        "keep_right": 0,
+        "pedestrian_crossing": 0
+      },
+      "gtsrb_class_counts": {
+        "1": 0,
+        "5": 0,
+        "12": 0,
+        "14": 0,
+        "34": 0,
+        "36": 0,
+        "38": 0
+      },
+      "skipped": {
+        "unmapped_gtsrb_class": 0,
+        "missing_image": 0,
+        "invalid_test_row": 12630
+      }
+    }
+  },
+  "class_counts": {
+    "stop": 780,
+    "speed_limit_30": 2220,
+    "speed_limit_60": 1860,
+    "turn_left": 2070,
+    "turn_right": 420,
+    "keep_right": 390,
+    "pedestrian_crossing": 2100
+  },
+  "gtsrb_class_counts": {
+    "1": 2220,
+    "5": 1860,
+    "12": 2100,
+    "14": 780,
+    "34": 420,
+    "36": 390,
+    "38": 2070
+  },
+  "skipped": {
+    "unmapped_gtsrb_class": 0,
+    "missing_image": 0,
+    "invalid_test_row": 12630
+  },
+  "total_boxes_kept": 9840,
+  "images_exported": 9840,
+  "val_source": "gtsrb_official_test"
+}

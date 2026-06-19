@@ -6,8 +6,9 @@ __pycache__/
 # Generated outputs
 outputs/
 
-# Local dataset images (hard-linked to external BDD100K; regenerate via prepare script)
+# Local dataset images (hard-linked to external BDD100K/GTSRB; regenerate via prepare script)
 data/traffic_signal_yolo/images/
+data/traffic_sign_yolo/images/
 
 # Large Colab export archives (upload to Drive separately)
 data/*.zip

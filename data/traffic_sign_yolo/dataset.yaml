@@ -1,0 +1,12 @@
+path: C:/Users/gauth/Desktop/Autonomous Driving Car/data/traffic_sign_yolo
+train: images/train
+val: images/val
+nc: 7
+names:
+  0: stop
+  1: speed_limit_30
+  2: speed_limit_60
+  3: turn_left
+  4: turn_right
+  5: keep_right
+  6: pedestrian_crossing
